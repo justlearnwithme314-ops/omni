@@ -1,0 +1,21 @@
+{
+  "features": {
+    "context_compaction": true,
+    "speculative_execution": false,
+    "internal_urls": true,
+    "subagents": true,
+    "pi_extensions": true,
+    "hermes_tool_calling": true,
+    "prefix_caching": true,
+    "lifecycle_hooks": true,
+    "auxiliary_client": true,
+    "self_evolution": false,
+    "hermes_plugins": true,
+    "openclaw_skills": true,
+    "permission_gates": true,
+    "session_persistence": true,
+    "multi_channel_gateway": false,
+    "mcp_servers": true,
+    "auth_gateway": true
+  }
+}

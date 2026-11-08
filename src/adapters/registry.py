@@ -1,0 +1,393 @@
+from __future__ import annotations
+from .omni import OmniAdapter
+
+import asyncio
+import json
+import logging
+import os
+import shutil
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+from .base import CanonicalTool, DiscoveryResult
+from .hermes import HermesAdapter
+from .mcp import MCPAdapter
+from .openclaw import OpenClawAdapter
+from .pi import PiAdapter
+
+logger = logging.getLogger("omni.adapters.registry")
+
+
+class MasterToolRegistry:
+    """Master registry aggregating tools across OpenClaw, Hermes, Pi, MCP, and Native adapters."""
+
+    def __init__(
+        self,
+        config: Optional[Any] = None,
+        event_bus: Optional[Any] = None,
+        root_dir: Optional[Union[str, Path]] = None,
+    ):
+        if root_dir is not None:
+            self.root_dir = Path(root_dir).resolve()
+        else:
+            self.root_dir = Path(__file__).resolve().parent.parent.parent
+
+        self.config = config
+        self.event_bus = event_bus
+        self._tools: Dict[str, CanonicalTool] = {}
+
+        # If config is None, attempt loading harness.config.json from root_dir
+        if self.config is None:
+            config_file = self.root_dir / "harness.config.json"
+            if config_file.is_file():
+                try:
+                    self.config = json.loads(config_file.read_text(encoding="utf-8"))
+                except Exception as e:
+                    logger.warning(f"Could not load harness.config.json: {e}")
+
+        # Adapters
+        self.openclaw_adapter = OpenClawAdapter(
+            root_dir=self.root_dir,
+            config=self.config,
+            event_bus=self.event_bus,
+        )
+        self.hermes_adapter = HermesAdapter(
+            root_dir=self.root_dir,
+            config=self.config,
+            event_bus=self.event_bus,
+        )
+        self.pi_adapter = PiAdapter(
+            root_dir=self.root_dir,
+            config=self.config,
+            event_bus=self.event_bus,
+        )
+        self.mcp_adapter = MCPAdapter(
+            root_dir=self.root_dir,
+            config=self.config,
+            event_bus=self.event_bus,
+        )
+
+    def _is_feature_enabled(self, feature_name: str) -> bool:
+        """Checks if a feature is enabled on config object, config dict, or default."""
+        cfg = self.config
+        if cfg is not None:
+            # 1. Config object method is_feature_enabled()
+            if hasattr(cfg, "is_feature_enabled") and callable(cfg.is_feature_enabled):
+                return bool(cfg.is_feature_enabled(feature_name))
+
+            # 2. Config object attribute .features
+            if hasattr(cfg, "features"):
+                feat = cfg.features
+                if isinstance(feat, dict):
+                    return bool(feat.get(feature_name, False))
+                if hasattr(feat, feature_name):
+                    return bool(getattr(feat, feature_name, False))
+
+            # 3. Config dictionary
+            if isinstance(cfg, dict):
+                feat = cfg.get("features", {})
+                if isinstance(feat, dict) and feature_name in feat:
+                    return bool(feat.get(feature_name))
+                if feature_name in cfg:
+                    return bool(cfg.get(feature_name))
+
+        # Default to enabled if not explicitly specified
+        return True
+
+    def _register_native_tools(self):
+        """Registers native core tools: read_file, write_file, execute_bash."""
+
+        async def read_file_handler(args: dict, context: dict = None) -> str:
+            path_str = args.get("path")
+            if not path_str:
+                raise ValueError("Parameter 'path' is required for read_file")
+
+            file_path = Path(path_str).expanduser().resolve()
+            if not file_path.is_file():
+                raise FileNotFoundError(f"File not found: {path_str}")
+
+            offset = int(args.get("offset", 1))
+            limit = args.get("limit")
+            limit_val = int(limit) if limit is not None else None
+
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+            lines = text.splitlines(keepends=True)
+
+            start_idx = max(0, offset - 1)
+            if limit_val is not None:
+                end_idx = start_idx + max(0, limit_val)
+                sliced = lines[start_idx:end_idx]
+            else:
+                sliced = lines[start_idx:]
+
+            return "".join(sliced)
+
+        async def write_file_handler(args: dict, context: dict = None) -> str:
+            path_str = args.get("path")
+            if not path_str:
+                raise ValueError("Parameter 'path' is required for write_file")
+
+            content = args.get("content", "")
+            file_path = Path(path_str).expanduser().resolve()
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding="utf-8")
+            return f"Successfully wrote {len(content)} characters to {path_str}"
+
+        async def execute_bash_handler(args: dict, context: dict = None) -> str:
+            cmd = args.get("command")
+            if not cmd:
+                raise ValueError("Parameter 'command' is required for execute_bash")
+
+            cwd = args.get("cwd")
+            timeout = args.get("timeout")
+            timeout_sec = float(timeout) if timeout is not None else None
+
+            bash_bin = shutil.which("bash")
+            if bash_bin:
+                proc = await asyncio.create_subprocess_exec(
+                    bash_bin,
+                    "-c",
+                    cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                )
+            else:
+                proc = await asyncio.create_subprocess_shell(
+                    cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                )
+
+            try:
+                if timeout_sec:
+                    stdout, stderr = await asyncio.wait_for(
+                        proc.communicate(),
+                        timeout=timeout_sec,
+                    )
+                else:
+                    stdout, stderr = await proc.communicate()
+            except asyncio.TimeoutError:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                raise TimeoutError(f"Command '{cmd}' timed out after {timeout_sec} seconds")
+
+            out_text = stdout.decode("utf-8", errors="replace").strip()
+            err_text = stderr.decode("utf-8", errors="replace").strip()
+
+            if proc.returncode != 0:
+                return f"Exit code {proc.returncode}:\n{err_text or out_text}"
+            return out_text if out_text else err_text
+
+        # 1. read_file
+        self.register_tool(
+            CanonicalTool(
+                name="read_file",
+                description="Reads content from a local file, with optional offset and limit for line slicing.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to read",
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Line number to begin reading from (1-indexed)",
+                            "default": 1,
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of lines to read",
+                        },
+                    },
+                    "required": ["path"],
+                },
+                handler=read_file_handler,
+                source="native",
+            )
+        )
+
+        # 2. write_file
+        self.register_tool(
+            CanonicalTool(
+                name="write_file",
+                description="Writes content to a file, creating parent directories if they do not exist.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the file to write",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write into the file",
+                        },
+                    },
+                    "required": ["path", "content"],
+                },
+                handler=write_file_handler,
+                source="native",
+            )
+        )
+
+        # 3. execute_bash
+        self.register_tool(
+            CanonicalTool(
+                name="execute_bash",
+                description="Executes a bash shell command and returns stdout/stderr.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "Bash command to execute",
+                        },
+                        "cwd": {
+                            "type": "string",
+                            "description": "Optional working directory for the command",
+                        },
+                        "timeout": {
+                            "type": "number",
+                            "description": "Optional execution timeout in seconds",
+                        },
+                    },
+                    "required": ["command"],
+                },
+                handler=execute_bash_handler,
+                source="native",
+            )
+        )
+
+    def register_tool(self, tool: CanonicalTool) -> None:
+        """Register a canonical tool into the master registry."""
+        if not isinstance(tool, CanonicalTool):
+            raise TypeError(f"Expected CanonicalTool instance, got {type(tool).__name__}")
+        self._tools[tool.name] = tool
+
+    def get_tool(self, name: str) -> Optional[CanonicalTool]:
+        """Retrieve a registered tool by name."""
+        return self._tools.get(name)
+
+    def list_tools(self) -> List[CanonicalTool]:
+        """List all registered tools."""
+        return list(self._tools.values())
+
+    def get_openai_schemas(self) -> List[Dict[str, Any]]:
+        """Retrieve OpenAI function schemas for all enabled tools."""
+        return [
+            tool.to_openai_schema()
+            for tool in self._tools.values()
+            if tool.enabled
+        ]
+
+    def discover_all(self) -> DiscoveryResult:
+        """Discover tools across all enabled plugin systems and register native tools."""
+        # 1. Native core tools
+        self._register_native_tools()
+
+        # 2. OpenClaw adapter
+        if self._is_feature_enabled("plugins_openclaw"):
+            try:
+                claw_tools = self.openclaw_adapter.discover()
+                for tool in claw_tools:
+                    self.register_tool(tool)
+            except Exception as e:
+                logger.error(f"Error during OpenClaw tool discovery: {e}", exc_info=True)
+
+        # 3. Hermes adapter
+        if self._is_feature_enabled("plugins_hermes"):
+            try:
+                hermes_tools = self.hermes_adapter.discover()
+                for tool in hermes_tools:
+                    self.register_tool(tool)
+            except Exception as e:
+                logger.error(f"Error during Hermes tool discovery: {e}", exc_info=True)
+
+        # 4. Pi adapter
+        if self._is_feature_enabled("plugins_pi"):
+            try:
+                pi_tools = self.pi_adapter.discover()
+                for tool in pi_tools:
+                    self.register_tool(tool)
+            except Exception as e:
+                logger.error(f"Error during Pi tool discovery: {e}", exc_info=True)
+
+        # 5. MCP adapter
+        if self._is_feature_enabled("plugins_mcp"):
+            try:
+                mcp_tools = self.mcp_adapter.discover()
+                for tool in mcp_tools:
+                    self.register_tool(tool)
+            except Exception as e:
+                logger.error(f"Error during MCP tool discovery: {e}", exc_info=True)
+
+        # 6. Native Omni Custom Plugins (plugins/omni/)
+        try:
+            from .omni import OmniAdapter
+            omni_adapter = OmniAdapter(root_dir=self.root_dir, config=self.config, event_bus=self.event_bus)
+            for tool in omni_adapter.discover():
+                self.register_tool(tool)
+        except Exception as e:
+            logger.debug(f"OmniAdapter custom plugin error: {e}")
+
+        return DiscoveryResult(self.list_tools())
+
+    async def execute_tool(
+        self,
+        name: str,
+        args: Dict[str, Any],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Execute a registered tool by name with arguments and optional context."""
+        tool = self.get_tool(name)
+        if tool is None:
+            raise KeyError(f"Tool '{name}' not found in registry")
+
+        if not tool.enabled:
+            raise ValueError(f"Tool '{name}' is currently disabled")
+
+        # Emit start event if event_bus is present
+        if self.event_bus is not None and hasattr(self.event_bus, "emit"):
+            try:
+                res = self.event_bus.emit("before_tool_exec", tool_name=name, args=args, context=context)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:
+                pass
+
+        try:
+            result = await tool.execute(args=args, context=context)
+
+            # Emit success event if event_bus is present
+            if self.event_bus is not None and hasattr(self.event_bus, "emit"):
+                try:
+                    res = self.event_bus.emit(
+                        "after_tool_exec",
+                        tool_name=name,
+                        result=result,
+                        context=context,
+                    )
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+
+            return result
+        except Exception as e:
+            if self.event_bus is not None and hasattr(self.event_bus, "emit"):
+                try:
+                    res = self.event_bus.emit(
+                        "on_error",
+                        error=str(e),
+                        context={"tool": name, "args": args},
+                    )
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+            raise

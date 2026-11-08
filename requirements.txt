@@ -1,0 +1,5 @@
+prompt_toolkit>=3.0.40
+rich>=13.7.0
+pydantic>=2.0.0
+pyyaml>=6.0.0
+colorama>=0.4.6

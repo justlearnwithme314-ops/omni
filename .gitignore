@@ -1,0 +1,38 @@
+# Databases & Credentials
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+agent_auth.db
+telemetry.sqlite
+memory_graph.sqlite
+cron_tasks.sqlite
+sessions.sqlite
+*.env
+.env*
+
+# Python & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+tests/test_scratch/
+tests/test_scratch_adv/
+test_scratch_adv/
+
+# User History & Config Overrides
+.omni_history
+~/.omni_history
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
+# Vendor dragged Pi plugins (prevent secret scanner false positives from test fixtures)
+plugins/pi/@*
+plugins/pi/pi-*
+plugins/pi/agent-pi
+plugins/pi/context-mode

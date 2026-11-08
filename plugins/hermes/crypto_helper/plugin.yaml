@@ -1,0 +1,4 @@
+name: crypto_helper
+version: 1.0.0
+description: Hermes plugin providing cryptographic hashing tools
+author: OmniHarness

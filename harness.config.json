@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "active_mode": "autonomous",
+  "features": {
+    "plugins_pi": true,
+    "plugins_hermes": true,
+    "plugins_openclaw": true,
+    "plugins_mcp": true,
+    "self_evolution": false,
+    "context_compaction": true,
+    "auth_gateway": true,
+    "speculative_execution": false,
+    "openclaw_skills": true,
+    "hermes_plugins": true,
+    "pi_extensions": true,
+    "mcp_servers": true
+  },
+  "model_tiers": {
+    "fast": [
+      "google/gemini-2.5-flash",
+      "google/gemini-3.8-flash",
+      "openai/gpt-4o-mini"
+    ],
+    "smart": [
+      "google/gemini-2.5-flash",
+      "google-antigravity/claude-sonnet-5-5",
+      "anthropic/claude-3-5-sonnet"
+    ]
+  },
+  "directories": {
+    "plugins_pi": "plugins/pi",
+    "plugins_hermes": "plugins/hermes",
+    "plugins_openclaw": "plugins/openclaw",
+    "plugins_mcp": "plugins/mcp",
+    "skills": "skills"
+  },
+  "evolution": {
+    "enabled": true,
+    "trajectory_db": "telemetry.sqlite",
+    "min_failures_before_patch": 3
+  }
+}
