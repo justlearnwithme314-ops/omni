@@ -18,5 +18,5 @@
     "mcp_servers": true,
     "auth_gateway": true
   },
-  "command_profile": "full"
+  "command_profile": "pi"
 }

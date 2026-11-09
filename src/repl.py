@@ -95,7 +95,7 @@ class OmniCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):
                 for p_name in self.profiles:
                     if p_name.startswith(prefix.lower()):
                         yield Completion(p_name, start_position=-len(prefix), display_meta="Command Profile")
-            elif cmd == "/toggle":" 
+            elif cmd == "/toggle":
                 prefix = parts[1] if len(parts) > 1 and not text.endswith(" ") else ""
                 for feat in self.features:
                     if feat.startswith(prefix.lower()):
