@@ -113,6 +113,48 @@ class CommandExecutor:
                 return True, f"[✓] {msg}\n{f_lines}"
             return True, f"[!] {msg}"
 
+
+        elif name == "toggle":
+            from rich.console import Console
+            from rich.table import Table
+            from rich import box
+            from ..features.themes import ThemeManager
+            from .features import FeatureRegistry, CANONICAL_FEATURES
+
+            mgr = FeatureRegistry(config_data=getattr(self.config, "config_data", {}), config_path=getattr(self.config, "config_path", None))
+            tm = ThemeManager()
+            theme = tm.get_theme()
+
+            if not arg:
+                c = Console(safe_box=False)
+                table = Table(title=f"[bold {theme.primary}]Omni Modular Feature Toggles[/bold {theme.primary}]", header_style=f"bold {theme.secondary}", box=box.ROUNDED)
+                table.add_column("Category", style=theme.accent, width=12)
+                table.add_column("Feature ID", style="bold white", width=24)
+                table.add_column("Status", width=10)
+                table.add_column("Description", style="dim")
+
+                for f_info in mgr.list_features():
+                    st = f"[bold {theme.success}]ON[/bold {theme.success}]" if f_info["enabled"] else f"[bold {theme.error}]OFF[/bold {theme.error}]"
+                    table.add_row(f_info["category"].upper(), f_info["id"], st, f_info["description"][:65])
+
+                c.print()
+                c.print(table)
+                c.print()
+                return True, "Usage: /toggle <feature_id> [on|off]"
+
+            parts = arg.split(maxsplit=1)
+            f_id = parts[0].strip().lower()
+            val = parts[1].strip().lower() in ("on", "true", "1", "yes") if len(parts) > 1 else None
+
+            new_val = mgr.set_feature(f_id, val) if val is not None else mgr.toggle(f_id)
+            if new_val is not None:
+                if self.tool_registry and hasattr(self.tool_registry, "apply_feature_toggles"):
+                    self.tool_registry.apply_feature_toggles(mgr)
+                st_str = "ENABLED (ON)" if mgr.is_enabled(f_id) else "DISABLED (OFF)"
+                active_tools = len([t for t in self.tool_registry.list_tools() if t.enabled]) if self.tool_registry else 0
+                return True, f"[✓] Feature '{f_id}' is now {st_str}. Active tools: {active_tools}"
+            return True, f"[!] Unknown feature ID '{f_id}'. Type /toggle without arguments to list all features."
+
         elif name == "keys":
             keys = self.router.keyring.list_keys() if self.router else []
             lines = ["\n--- Omni Keyring Status ---"]

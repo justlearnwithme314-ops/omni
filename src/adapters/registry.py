@@ -277,6 +277,34 @@ class MasterToolRegistry:
         """List all registered tools."""
         return list(self._tools.values())
 
+
+    def apply_feature_toggles(self, feature_registry: Any) -> Dict[str, int]:
+        """Dynamically enables or disables registered tools based on active feature toggles."""
+        is_enabled_fn = getattr(feature_registry, "is_enabled", None) or getattr(feature_registry, "is_feature_enabled", None)
+        if is_enabled_fn is None and isinstance(feature_registry, dict):
+            is_enabled_fn = lambda k: feature_registry.get(k, True)
+
+        openclaw_active = is_enabled_fn("openclaw_skills") if is_enabled_fn else True
+        hermes_active = is_enabled_fn("hermes_plugins") if is_enabled_fn else True
+        pi_active = is_enabled_fn("pi_extensions") if is_enabled_fn else True
+        mcp_active = is_enabled_fn("mcp_servers") if is_enabled_fn else True
+
+        enabled_counts = {}
+        for tool in self._tools.values():
+            if tool.source == "openclaw":
+                tool.enabled = bool(openclaw_active)
+            elif tool.source == "hermes":
+                tool.enabled = bool(hermes_active)
+            elif tool.source == "pi":
+                tool.enabled = bool(pi_active)
+            elif tool.source == "mcp":
+                tool.enabled = bool(mcp_active)
+            elif tool.source in ("native", "omni"):
+                tool.enabled = True
+            enabled_counts[tool.source] = enabled_counts.get(tool.source, 0) + (1 if tool.enabled else 0)
+
+        return enabled_counts
+
     def get_openai_schemas(self) -> List[Dict[str, Any]]:
         """Retrieve OpenAI function schemas for all enabled tools."""
         return [
