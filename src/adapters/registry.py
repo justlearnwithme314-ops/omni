@@ -325,6 +325,129 @@ class MasterToolRegistry:
         # 1. Native core tools
         self._register_native_tools()
 
+        
+        # --- 4. Browser DevTools Protocol (CDP) Relay Tool ---
+        async def browser_cdp_handler(args: dict, context: dict = None) -> str:
+            from ..features.browser_relay import ChromeDevToolsRelay
+            relay = ChromeDevToolsRelay()
+            action = args.get("action", "list_tabs")
+            if action == "list_tabs":
+                tabs = [t.__dict__ for t in relay.list_tabs()]
+                return json.dumps({"tabs": tabs})
+            elif action == "snapshot_dom":
+                return json.dumps(relay.snapshot_dom(tab_id=args.get("tab_id")))
+            elif action == "evaluate_js":
+                expr = args.get("expression", "document.title")
+                return json.dumps({"result": relay.evaluate_js(expr, tab_id=args.get("tab_id"))})
+            elif action == "click":
+                return json.dumps({"success": relay.click_element(args.get("selector", "body"), tab_id=args.get("tab_id"))})
+            return json.dumps({"error": f"Unknown action '{action}'"})
+
+        self.register_tool(
+            CanonicalTool(
+                name="browser_cdp",
+                description="Chrome DevTools Protocol (CDP) bridge to inspect live tabs, snapshot DOM, and evaluate JS in your desktop browser.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": ["list_tabs", "snapshot_dom", "evaluate_js", "click"], "default": "list_tabs"},
+                        "expression": {"type": "string"},
+                        "selector": {"type": "string"},
+                        "tab_id": {"type": "string"},
+                    },
+                },
+                handler=browser_cdp_handler,
+                source="omni",
+                enabled=True,
+            )
+        )
+
+        # --- 5. Language Server Protocol (LSP) Intelligence Tool ---
+        async def lsp_query_handler(args: dict, context: dict = None) -> str:
+            from ..features.lsp_bridge import LspClient
+            client = LspClient()
+            op = args.get("operation", "diagnostics")
+            target = args.get("file_path", "src/cli.py")
+            res = client.execute_lsp_operation(op, target, query=args.get("query", ""), symbol=args.get("symbol", ""))
+            return json.dumps(res)
+
+        self.register_tool(
+            CanonicalTool(
+                name="lsp_query",
+                description="Language Server Protocol (LSP) tool for symbol diagnostics, definition lookup, and symbols.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string", "enum": ["diagnostics", "symbols", "definition", "rename"], "default": "diagnostics"},
+                        "file_path": {"type": "string"},
+                        "symbol": {"type": "string"},
+                        "query": {"type": "string"},
+                    },
+                    "required": ["file_path"],
+                },
+                handler=lsp_query_handler,
+                source="omni",
+                enabled=True,
+            )
+        )
+
+        # --- 6. Visual Canvas Renderer Tool ---
+        async def canvas_render_handler(args: dict, context: dict = None) -> str:
+            from ..features.visual_canvas import VisualCanvasManager
+            vcm = VisualCanvasManager(port=18790)
+            doc = vcm.create_document(
+                title=args.get("title", "Visual Artifact"),
+                content=args.get("content", ""),
+                kind=args.get("kind", "mermaid"),
+            )
+            return json.dumps(doc.to_dict())
+
+        self.register_tool(
+            CanonicalTool(
+                name="canvas_render",
+                description="Renders visual diagrams, Mermaid flowcharts, or interactive HTML bundles onto the live visual canvas.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "content": {"type": "string"},
+                        "kind": {"type": "string", "enum": ["mermaid", "html_bundle", "svg"], "default": "mermaid"},
+                    },
+                    "required": ["title", "content"],
+                },
+                handler=canvas_render_handler,
+                source="omni",
+                enabled=True,
+            )
+        )
+
+        # --- 7. Companion Device Node Task Tool ---
+        async def remote_node_task_handler(args: dict, context: dict = None) -> str:
+            from ..features.node_pairing import NodePairingManager
+            npm = NodePairingManager()
+            node_id = args.get("node_id", "node_local_host")
+            cap = args.get("capability", "system.run")
+            res = npm.dispatch_remote_task(node_id, cap, args.get("params", {"command": "echo 'ok'"}))
+            return json.dumps(res)
+
+        self.register_tool(
+            CanonicalTool(
+                name="remote_node_task",
+                description="Dispatches a capability task (screen capture, notification, command run) to a paired companion device.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "node_id": {"type": "string"},
+                        "capability": {"type": "string", "enum": ["screen.capture", "system.run", "notification"], "default": "system.run"},
+                        "params": {"type": "object"},
+                    },
+                },
+                handler=remote_node_task_handler,
+                source="omni",
+                enabled=True,
+            )
+        )
+
         # 2. OpenClaw adapter (discover all available skills into registry)
         try:
             claw_tools = self.openclaw_adapter.discover()

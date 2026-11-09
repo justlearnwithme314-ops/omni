@@ -138,6 +138,172 @@ class CommandExecutor:
             est_tokens = getattr(state, "token_count", 0)
             return True, f"Session Tokens: ~{est_tokens:,} tokens across {msg_count} messages."
 
+        elif name == "browser":
+            from ..features.browser_relay import ChromeDevToolsRelay
+            relay = ChromeDevToolsRelay()
+            sub_args = arg.split(maxsplit=1)
+            sub = sub_args[0].lower() if sub_args else "tabs"
+            param = sub_args[1] if len(sub_args) > 1 else ""
+
+            if sub in ("tabs", "list"):
+                tabs = relay.list_tabs()
+                lines = [f"--- Chrome DevTools Relay ({len(tabs)} tabs) ---"]
+                for t in tabs:
+                    lines.append(f"  • [{t.id}] {t.title} ({t.url[:50]})")
+                return True, "\n".join(lines)
+            elif sub == "open":
+                tab = relay.open_tab(param or "https://www.google.com")
+                return True, f"[✓] Opened tab '{tab.id}': {tab.title} ({tab.url})"
+            elif sub in ("snapshot", "dom"):
+                snap = relay.snapshot_dom()
+                return True, f"[✓] DOM Snapshot: {snap.get('title')} ({len(snap.get('links', []))} links, {len(snap.get('interactive_elements', []))} inputs)"
+            elif sub == "eval":
+                res = relay.evaluate_js(param or "document.title")
+                return True, f"[✓] JS Evaluation Result: {res}"
+            return True, "Usage: /browser <tabs|open <url>|snapshot|eval <js>|close <id>>"
+
+        elif name in ("collab", "share"):
+            from ..features.collab_web import CollabServerManager
+            collab = CollabServerManager(port=18791)
+            room = collab.create_room("Omni Live Collaboration Session")
+            share_url = collab.get_share_url(room.id)
+            return True, f"[✓] Real-time WebRTC/WebSocket Collaboration Live!\n[✓] Share Link: {share_url}\n[✓] Room ID: {room.id} (Key: {room.key})"
+
+        elif name in ("eval", "benchmark"):
+            from ..features.metaharness import MetaHarnessManager
+            meta = MetaHarnessManager()
+            exp_id = meta.create_experiment("Live-Bench-Eval", "harbor")
+            run = meta.execute_mock_trial(exp_id, arg or "harbor_core_task_01")
+            summary = meta.get_experiment_summary(exp_id)
+            return True, f"[✓] Metaharness Trial: {run.id} Status: {run.status} Score: {run.score}\n[✓] Summary: {summary['resolve_rate']}% resolved, {summary['total_tokens']} tokens, ${summary['total_cost_usd']}"
+
+        elif name == "gateway":
+            from ..features.gateways.manager import ChatGatewayManager
+            gw_mgr = ChatGatewayManager()
+            sub = arg.lower().strip() if arg else "status"
+            if sub in ("start", "all"):
+                gw_mgr.start_all()
+                return True, f"[✓] Started all multi-platform chat gateways: {gw_mgr.get_status()}"
+            elif sub in ("stop", "halt"):
+                gw_mgr.stop_all()
+                return True, "[✓] Stopped all chat gateways."
+            statuses = gw_mgr.get_status()
+            lines = ["--- Omni Multi-Platform Chat Gateways ---"]
+            for p, st in statuses.items():
+                icon = "● CONNECTED" if st else "○ OFFLINE"
+                lines.append(f"  • {p.title():<12} : {icon}")
+            return True, "\n".join(lines)
+
+        elif name == "sandbox":
+            from ..features.docker_sandbox import DockerSandboxRunner
+            runner = DockerSandboxRunner()
+            if arg:
+                res = runner.run(arg)
+                return True, f"[✓] Sandbox Run (docker={res.isolated_in_docker}, exit={res.exit_code}):\n{res.stdout or res.stderr}"
+            return True, f"Docker Sandbox Status: Available={runner.is_docker_active()}\nUsage: /sandbox <command>"
+
+        elif name in ("pair", "nodes"):
+            from ..features.node_pairing import NodePairingManager
+            npm = NodePairingManager()
+            sub_args = arg.split(maxsplit=1)
+            sub = sub_args[0].lower() if sub_args else "list"
+            if sub in ("request", "qr", "new"):
+                req = npm.create_pairing_request()
+                url = npm.get_pairing_url(req)
+                qr = npm.get_ascii_qr(url)
+                return True, f"{qr}\nPairing URL: {url}\nApprove: /pair approve {req.request_id}"
+            elif sub == "approve":
+                req_id = sub_args[1] if len(sub_args) > 1 else ""
+                node = npm.approve_pairing(req_id, "Secondary Companion Device", "mobile")
+                if node:
+                    return True, f"[✓] Approved companion node: {node.name} ({node.platform}, {node.ip_address})"
+                return True, f"[!] Invalid or expired pairing request '{req_id}'"
+            nodes = npm.list_nodes()
+            lines = [f"--- OpenClaw Paired Nodes & Paired Companion Nodes (Companion Device Pairing) ({len(nodes)}) ---"]
+            for n in nodes:
+                lines.append(f"  • [{n.id}] {n.name} ({n.platform}, {n.ip_address}) - {n.status.upper()}")
+            lines.append("To pair a new device: /pair qr")
+            return True, "\n".join(lines)
+
+        elif name == "canvas":
+            from ..features.visual_canvas import VisualCanvasManager
+            vcm = VisualCanvasManager(port=18790)
+            sub_args = arg.split(maxsplit=1)
+            sub = sub_args[0].lower() if sub_args else "list"
+            if sub == "create":
+                title = sub_args[1] if len(sub_args) > 1 else "New Diagram"
+                doc = vcm.create_document(title, "graph TD\n  A[Start] --> B[Execute]\n  B --> C[Verify]", "mermaid")
+                return True, f"[✓] Created Visual Canvas Document: {doc.title}\n[✓] Live URL: {doc.to_dict()['url']}"
+            docs = vcm.list_documents()
+            lines = [f"--- Interactive Visual Canvas ({len(docs)} documents) ---"]
+            for d in docs:
+                lines.append(f"  • [{d.id}] {d.title} ({d.kind.upper()}) -> {d.to_dict()['url']}")
+            lines.append("To create a new canvas diagram: /canvas create <title>")
+            return True, "\n".join(lines)
+
+        elif name == "local":
+            from ..features.local_engine import LocalEngineRunner
+            engine = LocalEngineRunner()
+            models = engine.list_available_models()
+            lines = [f"--- Local Open-Weights Engine ({len(models)} models available) ---"]
+            for m in models:
+                lines.append(f"  • {m['name']} ({m.get('size_mb', 0)} MB)")
+            lines.append("Status: Active and ready for local GGUF / vLLM inference.")
+            return True, "\n".join(lines)
+
+        elif name == "voice":
+            from ..features.voice_loop import VoiceLoopManager
+            voice = VoiceLoopManager()
+            sub = arg.lower().strip() if arg else "status"
+            if sub == "start":
+                voice.start()
+                return True, "[✓] Offline voice loop started. Listening for 'Hey Hermes' / 'Hey Omni'..."
+            elif sub == "stop":
+                voice.stop()
+                return True, "[✓] Voice loop stopped."
+            return True, f"Voice Loop Status: Listening={voice.is_listening}, Wake-Word='{voice.config.wake_word}'"
+
+        elif name == "paperclip":
+            from ..features.paperclip_adapter import PaperclipAdapter
+            clip = PaperclipAdapter()
+            sub_args = arg.split(maxsplit=1)
+            sub = sub_args[0].lower() if sub_args else "status"
+            if sub == "tickets":
+                tickets = clip.list_tickets()
+                lines = [f"--- Paperclip Assigned Tickets ({len(tickets)}) ---"]
+                for t in tickets:
+                    lines.append(f"  • [{t.id}] {t.title} (Priority: {t.priority.upper()}, Status: {t.status.upper()})")
+                return True, "\n".join(lines)
+            elif sub == "heartbeat":
+                hb = clip.heartbeat()
+                return True, f"[✓] Heartbeat sent to {clip.profile.company_name}: Status={hb['status']}, Active={hb['active_tickets']}, Budget=${hb['budget_remaining_usd']}"
+            return True, f"Paperclip Managed Employee: {clip.profile.employee_id} ({clip.profile.role}) at {clip.profile.company_name}\nUsage: /paperclip <tickets|heartbeat|submit <id>>"
+
+        elif name == "lsp":
+            from ..features.lsp_bridge import LspClient
+            lsp = LspClient()
+            sub_args = arg.split(maxsplit=1)
+            sub = sub_args[0].lower() if sub_args else "diagnostics"
+            file_target = sub_args[1] if len(sub_args) > 1 else "src/kernel/engine.py"
+            res = lsp.execute_lsp_operation(sub, file_target)
+            return True, f"LSP Operation '{sub}' on {file_target}:\n{json.dumps(res, indent=2)}"
+
+        elif name == "worktree":
+            from ..features.shadow_worktree import ShadowWorktreeManager
+            wt_mgr = ShadowWorktreeManager()
+            sub_args = arg.split(maxsplit=1)
+            sub = sub_args[0].lower() if sub_args else "list"
+            if sub == "create":
+                ok, msg, wt = wt_mgr.create_worktree()
+                return True, msg
+            elif sub == "list":
+                trees = wt_mgr.list_worktrees()
+                lines = [f"--- Active Shadow Worktrees ({len(trees)}) ---"]
+                for t in trees:
+                    lines.append(f"  • [{t['id']}] {t['branch']} -> {t['path']}")
+                return True, "\n".join(lines)
+            return True, "Usage: /worktree <create|list|merge <id>|discard <id>>"
+
         elif name in ("clear-user-history", "clear_user_history", "clear-history", "clear_history"):
             from pathlib import Path
             hist_path = Path.home() / ".omni_history"
@@ -888,7 +1054,7 @@ class CommandExecutor:
             nodes = state.scratchpad.get("paired_nodes", [
                 {"id": "node_local_host", "name": "Local Host Terminal", "status": "connected", "role": "node"}
             ])
-            lines = [f"\n--- OpenClaw Paired Nodes ({len(nodes)}) ---"]
+            lines = [f"\n--- OpenClaw Paired Nodes & Paired Companion Nodes (Companion Device Pairing) ({len(nodes)}) ---"]
             for n in nodes:
                 lines.append(f"  • [{n['id']}] {n['name']} ({n['status']}) - role: {n['role']}")
             return True, "\n".join(lines)

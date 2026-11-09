@@ -1,0 +1,93 @@
+[
+  {
+    "id": "node_local_host",
+    "name": "Local Host Terminal",
+    "platform": "windows",
+    "ip_address": "127.0.0.1",
+    "capabilities": [
+      "system.run",
+      "screen.capture",
+      "notification"
+    ],
+    "status": "online",
+    "paired_at": 1794231834.1593394
+  },
+  {
+    "id": "node_9874c7ee",
+    "name": "Test Companion",
+    "platform": "android",
+    "ip_address": "127.0.0.1",
+    "capabilities": [
+      "screen.capture",
+      "system.run",
+      "notification"
+    ],
+    "status": "online",
+    "paired_at": 1794231834.1593394
+  },
+  {
+    "id": "node_2d433b5b",
+    "name": "Test Companion",
+    "platform": "android",
+    "ip_address": "127.0.0.1",
+    "capabilities": [
+      "screen.capture",
+      "system.run",
+      "notification"
+    ],
+    "status": "online",
+    "paired_at": 1794231989.2023563
+  },
+  {
+    "id": "node_a35f348a",
+    "name": "Test Companion",
+    "platform": "android",
+    "ip_address": "127.0.0.1",
+    "capabilities": [
+      "screen.capture",
+      "system.run",
+      "notification"
+    ],
+    "status": "online",
+    "paired_at": 1794232013.4092426
+  },
+  {
+    "id": "node_40b00d3b",
+    "name": "Test Companion",
+    "platform": "android",
+    "ip_address": "127.0.0.1",
+    "capabilities": [
+      "screen.capture",
+      "system.run",
+      "notification"
+    ],
+    "status": "online",
+    "paired_at": 1794232061.4071045
+  },
+  {
+    "id": "node_d11b293a",
+    "name": "Test Companion",
+    "platform": "android",
+    "ip_address": "127.0.0.1",
+    "capabilities": [
+      "screen.capture",
+      "system.run",
+      "notification"
+    ],
+    "status": "online",
+    "paired_at": 1794232097.9114227
+  },
+  {
+    "id": "node_6660051c",
+    "name": "Test Companion",
+    "platform": "android",
+    "ip_address": "127.0.0.1",
+    "capabilities": [
+      "screen.capture",
+      "system.run",
+      "notification"
+    ],
+    "status": "online",
+    "paired_at": 1794232152.4672759
+  }
+]

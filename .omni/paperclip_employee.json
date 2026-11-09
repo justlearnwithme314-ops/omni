@@ -1,0 +1,31 @@
+{
+  "profile": {
+    "company_name": "Paperclip Global Corp",
+    "employee_id": "emp_omni_01",
+    "role": "Autonomous Principal Systems Engineer",
+    "manager_id": "manager_director_01",
+    "monthly_budget_usd": 150.0,
+    "spent_usd": 3.42,
+    "status": "active"
+  },
+  "tickets": [
+    {
+      "id": "TICK-101",
+      "title": "Implement Universal Plugin Hot-Reloading",
+      "description": "Refactor adapter engine to discover plugins with zero restarts.",
+      "priority": "high",
+      "status": "submitted",
+      "assigned_to": "emp_omni_01",
+      "created_at": 1794231461.648483
+    },
+    {
+      "id": "TICK-102",
+      "title": "Optimize Token Prefix Cache Alignment",
+      "description": "Align system prompts on 1024-byte boundaries for Antigravity cache hits.",
+      "priority": "medium",
+      "status": "todo",
+      "assigned_to": "emp_omni_01",
+      "created_at": 1794231461.648483
+    }
+  ]
+}
