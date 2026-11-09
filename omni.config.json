@@ -17,5 +17,6 @@
     "multi_channel_gateway": false,
     "mcp_servers": true,
     "auth_gateway": true
-  }
+  },
+  "command_profile": "pi"
 }

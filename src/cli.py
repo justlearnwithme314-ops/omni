@@ -125,6 +125,37 @@ def cmd_mode(args, config: HarnessConfig):
     else:
         print(f"[!] Unknown mode '{args.name}'. Available: lean, balanced, autonomous, evolve")
 
+
+def cmd_profile(args, config: HarnessConfig):
+    from .kernel.commands import CommandRegistry, COMMAND_PROFILES
+    reg = CommandRegistry(config=config, active_profile=getattr(config, "command_profile", "full"))
+    if not args.name:
+        cur = reg.active_profile.upper()
+        print(f"\nActive Command Profile: {cur}")
+        print("Available Profiles:")
+        for k, p in COMMAND_PROFILES.items():
+            m = " * " if k == reg.active_profile else "   "
+            print(f" {m}{k.upper():<12} - {p["description"]}")
+        return
+    if reg.apply_profile(args.name):
+        print(f"[✓] Switched command profile to: {args.name.upper()}")
+    else:
+        print(f"[!] Unknown profile '{args.name}'. Available: {list(COMMAND_PROFILES.keys())}")
+
+
+def cmd_commands(args, config: HarnessConfig):
+    from .kernel.commands import CommandRegistry
+    reg = CommandRegistry(config=config, active_profile=getattr(config, "command_profile", "full"))
+    cmds = reg.get_active_commands()
+    print(f"\n=== Active Omni Slash Commands (Profile: {reg.active_profile.upper()}) ===")
+    categories = {}
+    for c in cmds:
+        categories.setdefault(c.category, []).append(c)
+    for cat, clist in sorted(categories.items()):
+        print(f"\n  [{cat.upper()}]:")
+        for c in clist:
+            print(f"    /{c.name:<16} - {c.description}")
+
 def cmd_models(args, config: HarnessConfig, keyring: Keyring):
     from .providers.router import MODEL_ALIASES
     active_def = getattr(config, "default_model", None) or "google/gemini-2.5-flash"
@@ -282,6 +313,13 @@ def main():
     mode_parser = subparsers.add_parser("mode", help="Get or set runtime profile mode")
     mode_parser.add_argument("name", nargs="?", choices=["lean", "balanced", "autonomous", "evolve"], help="Profile mode")
 
+    # Command profile command
+    profile_parser = subparsers.add_parser("profile", help="View or set active command profile (pi, omp, hermes, openclaw, full)")
+    profile_parser.add_argument("name", nargs="?", choices=["pi", "omp", "hermes", "openclaw", "full"], help="Profile name")
+
+    # List active commands
+    subparsers.add_parser("commands", help="List active slash commands under current profile")
+
     # Plugins command
     subparsers.add_parser("plugins", help="List all discovered drop-in plugins and skills")
 
@@ -313,6 +351,10 @@ def main():
         cmd_toggle(args, config)
     elif args.command == "mode":
         cmd_mode(args, config)
+    elif args.command == "profile":
+        cmd_profile(args, config)
+    elif args.command == "commands":
+        cmd_commands(args, config)
     elif args.command == "plugins":
         cmd_plugins(args, config)
     elif args.command == "stats":

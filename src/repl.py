@@ -1,3 +1,5 @@
+from .kernel.commands import CommandRegistry, COMMAND_PROFILES
+from .kernel.commands_executor import CommandExecutor
 """
 Omni Interactive REPL
 Built with prompt_toolkit and rich: arrow key navigation, auto-suggestions,
@@ -88,7 +90,12 @@ class OmniCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):
                     if mode_name.startswith(prefix.lower()):
                         yield Completion(mode_name, start_position=-len(prefix), display_meta="Profile Mode")
 
-            elif cmd == "/toggle":
+            elif cmd == "/profile":
+                prefix = parts[1] if len(parts) > 1 and not text.endswith(" ") else ""
+                for p_name in self.profiles:
+                    if p_name.startswith(prefix.lower()):
+                        yield Completion(p_name, start_position=-len(prefix), display_meta="Command Profile")
+            elif cmd == "/toggle":" 
                 prefix = parts[1] if len(parts) > 1 and not text.endswith(" ") else ""
                 for feat in self.features:
                     if feat.startswith(prefix.lower()):
@@ -140,13 +147,22 @@ async def run_rich_repl(
     raw_model = initial_model or getattr(config, "default_model", None) or "google/gemini-2.5-flash"
     active_model = router.resolve_model(raw_model)
 
+    cmd_registry = CommandRegistry(config=config, active_profile=getattr(config, "command_profile", "full"))
+    cmd_executor = CommandExecutor(
+        command_registry=cmd_registry,
+        engine=engine,
+        config=config,
+        router=router,
+        tool_registry=tool_registry,
+        tracer=tracer,
+    )
     history_file = os.path.expanduser("~/.omni_history")
 
     # Prompt session initialization
     session = None
     if HAVE_PROMPT_TOOLKIT:
         try:
-            completer = OmniCompleter(feature_registry)
+            completer = OmniCompleter(feature_registry, cmd_registry)
             session = PromptSession(
                 history=FileHistory(history_file),
                 auto_suggest=AutoSuggestFromHistory(),
@@ -196,6 +212,17 @@ async def run_rich_repl(
 
             # Handle Slash Commands
             if line.startswith("/"):
+                def set_model_cb(new_m):
+                    nonlocal active_model
+                    active_model = router.resolve_model(new_m)
+
+                handled, cmd_msg = await cmd_executor.execute(
+                    line, session_state, context={"switch_model": set_model_cb}
+                )
+                if handled:
+                    if cmd_msg:
+                        print(cmd_msg)
+                    continue
                 parts = line.split(maxsplit=2)
                 cmd = parts[0].lower()
                 arg1 = parts[1].strip() if len(parts) > 1 else ""
