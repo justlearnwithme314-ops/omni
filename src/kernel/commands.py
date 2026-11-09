@@ -54,6 +54,11 @@ COMMAND_PROFILES: Dict[str, Dict[str, Any]] = {
 # All 56 OMP Top-Level CLI Subcommands (omp <command>)
 # ---------------------------------------------------------------------------
 CLI_SUBCOMMANDS: Dict[str, str] = {
+    "skin": "View or switch truecolor terminal themes (tokyo-night, catppuccin, matrix, nord, solarized)",
+    "split": "Render split-screen dual pane layout (pi-tui style)",
+    "prewalk": "Run 2-stage fast-model prewalk and smart-model code handoff",
+    "mm": "Manage project mental models cards (.omni/mental_models/)",
+    "astgrep": "Search code using AST structural pattern matching",
     "whoami": "Show your sender id, permission tier, and role",
     "openclaw": "Run the OpenClaw setup and repair assistant",
     "allowlist": "List, add, or remove security allowlist entries",
@@ -197,6 +202,11 @@ CLI_SUBCOMMANDS: Dict[str, str] = {
 # All Slash Commands Catalog
 # ---------------------------------------------------------------------------
 ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
+    {"name": "skin", "category": "core", "description": "View or switch truecolor themes (tokyo-night, catppuccin, matrix, nord, solarized)", "usage": "/skin [name]"},
+    {"name": "split", "category": "omp", "description": "Render split-screen dual pane layout (pi-tui style)", "usage": "/split"},
+    {"name": "prewalk", "category": "omp", "description": "Run 2-stage fast-model prewalk and smart-model code handoff", "usage": "/prewalk <task>"},
+    {"name": "mm", "category": "omp", "description": "Manage project mental models cards (.omni/mental_models/)", "usage": "/mm [list|add <slug>]"},
+    {"name": "astgrep", "category": "omp", "description": "Search code using AST structural pattern matching", "usage": "/astgrep <pattern>"},
     {"name": "secrets", "category": "openclaw", "description": "Manage secrets runtime and environment variables", "usage": "/secrets [list|get|set]"},
     {"name": "security", "category": "openclaw", "description": "Audit local configuration and state for security risks", "usage": "/security"},
     {"name": "channels", "category": "openclaw", "description": "Manage connected chat channels (Discord, Telegram, WhatsApp, Slack)", "usage": "/channels [list|test]"},

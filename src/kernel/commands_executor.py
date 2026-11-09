@@ -730,4 +730,82 @@ class CommandExecutor:
             state.scratchpad["title"] = arg
             return True, f"[✓] Session renamed to: '{arg}'"
 
+
+        # ===================================================================
+        # Visual & Advanced OMP/Hermes Handlers
+        # ===================================================================
+        elif name in ("skin", "theme"):
+            from ..features.themes import ThemeManager, THEMES
+            tm = ThemeManager()
+            if not arg:
+                lines = [f"\nActive Theme: {tm.active_theme_name.upper()}", "Available Truecolor Themes:"]
+                for t in THEMES.values():
+                    m = " * " if t.name == tm.active_theme_name else "   "
+                    lines.append(f" {m}{t.name:<16} - {t.description}")
+                lines.append("\nUsage: /skin <tokyo-night|catppuccin|matrix|nord|solarized>")
+                return True, "\n".join(lines)
+            if tm.set_theme(arg):
+                return True, f"[✓] Applied Truecolor Theme: {arg.upper()} ({THEMES[arg.lower()].description})"
+            return True, f"[!] Unknown theme '{arg}'. Available: {list(THEMES.keys())}"
+
+        elif name == "split":
+            from ..features.split_pane import DualPaneLayout
+            from ..features.checkpoints import GitCheckpointManager
+            diff_text = GitCheckpointManager().get_diff()
+            last_conv = "\n".join(f"{m.role}: {m.content[:120]}" for m in state.messages[-4:]) if state.messages else "New conversation"
+            todos = state.scratchpad.get("todos", [])
+            DualPaneLayout().display(last_conv, diff_text, todos)
+            return True, "[✓] Rendered Split-Screen Dual Pane (pi-tui style)."
+
+        elif name in ("mm", "mental-models"):
+            from ..features.mental_models import MentalModelRepository
+            mm_repo = MentalModelRepository()
+            if arg.startswith("add "):
+                parts = arg[4:].split(maxsplit=1)
+                slug = parts[0]
+                rule = parts[1] if len(parts) > 1 else "Invariant rule"
+                fpath = mm_repo.add_model(slug, slug.title(), rule)
+                return True, f"[✓] Added Mental Model '{slug}' to {fpath}"
+            models = mm_repo.list_models()
+            lines = [f"\n--- Project Mental Models ({len(models)} cards) ---"]
+            for m in models:
+                lines.append(f"  • [{m['slug']}] {m['title']} ({m['path']})")
+            lines.append("Usage: /mm add <slug> <rule_content>")
+            return True, "\n".join(lines)
+
+        elif name in ("astgrep", "ast-grep"):
+            from ..features.ast_grep import ASTGrepSearcher
+            searcher = ASTGrepSearcher()
+            query = arg or "complete"
+            funcs = searcher.search_functions(query)
+            lines = [f"\n--- AST-Grep Structural Search for '{query}' ({len(funcs)} functions) ---"]
+            for fn in funcs[:10]:
+                lines.append(f"  • {fn['kind']} {fn['name']}({', '.join(fn['args'])}) at {fn['file']}:{fn['line']}")
+            return True, "\n".join(lines)
+
+        elif name == "prewalk":
+            from ..features.prewalk import PrewalkHandoffEngine
+            engine = PrewalkHandoffEngine(router=self.router)
+            task = arg or "Analyze router architecture and add fallback metrics"
+            print(f"[*] Running 2-stage Prewalk Model Handoff for: '{task[:60]}...'")
+            report = await engine.execute_prewalk_handoff(task)
+            return True, (
+                f"\n=== Prewalk Model Handoff Complete ===\n"
+                f"Stage 1 ({report['fast_model']}): Scanned files & dependencies.\n"
+                f"Stage 2 ({report['smart_model']}): Code generation complete.\n\n"
+                f"{report['final_response']}"
+            )
+
+        elif name == "say":
+            from ..features.audio_chimes import AudioNotifier
+            if not arg:
+                return True, "Usage: /say <text to speak>"
+            AudioNotifier.say(arg)
+            return True, f"[✓] Speaking: '{arg}'"
+
+        elif name == "chime":
+            from ..features.audio_chimes import AudioNotifier
+            AudioNotifier.play_chime("success")
+            return True, "[♪] Played system notification chime."
+
         return False, ""
