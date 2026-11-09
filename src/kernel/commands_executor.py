@@ -139,7 +139,7 @@ class CommandExecutor:
             return True, f"Session Tokens: ~{est_tokens:,} tokens across {msg_count} messages."
 
         elif name == "tools":
-            tools = self.tool_registry.list_tools() if self.tool_registry else []
+            tools = [t for t in self.tool_registry.list_tools() if t.enabled] if self.tool_registry else []
             lines = [f"\n--- Active Tools ({len(tools)}) ---"]
             for t in tools:
                 lines.append(f"  • [{t.source.upper()}] {t.name}: {t.description[:80]}")
@@ -155,6 +155,32 @@ class CommandExecutor:
                 return True, f"[✓] {msg}\n{f_lines}"
             return True, f"[!] {msg}"
 
+
+
+        elif name == "mode":
+            from .features import FeatureRegistry, PROFILE_PRESETS
+            mgr = FeatureRegistry(config_data=getattr(self.config, "config_data", {}), config_path=getattr(self.config, "config_path", None))
+            if not arg:
+                cur = getattr(self.config, "active_mode", "autonomous")
+                lines = [f"\nCurrent Runtime Mode: {cur.upper()}", "Available Modes:"]
+                for k, p in PROFILE_PRESETS.items():
+                    m = " * " if k == cur.lower() else "   "
+                    lines.append(f" {m}{k.upper():<12} - {p['description']}")
+                lines.append("\nUsage: /mode <lean|balanced|autonomous|evolve>")
+                return True, "\n".join(lines)
+
+            new_mode = arg.lower().strip()
+            if new_mode in PROFILE_PRESETS:
+                mgr.apply_profile(new_mode)
+                if self.config:
+                    self.config.set_mode(new_mode)
+                if context and "switch_mode" in context:
+                    context["switch_mode"](new_mode)
+                if self.tool_registry and hasattr(self.tool_registry, "apply_feature_toggles"):
+                    self.tool_registry.apply_feature_toggles(mgr)
+                tool_cnt = len([t for t in self.tool_registry.list_tools() if t.enabled]) if self.tool_registry else 0
+                return True, f"[✓] Switched runtime mode to: {new_mode.upper()} - {PROFILE_PRESETS[new_mode]['description']}\n[✓] Active tools: {tool_cnt}"
+            return True, f"[!] Unknown mode '{arg}'. Available: {list(PROFILE_PRESETS.keys())}"
 
         elif name == "toggle":
             from rich.console import Console
@@ -383,7 +409,7 @@ class CommandExecutor:
             # Check Keys
             keys = self.router.keyring.list_keys() if self.router else []
             lines.append(f"  [✓] Keyring Credentials: {len(keys)} registered")
-            tools = self.tool_registry.list_tools() if self.tool_registry else []
+            tools = [t for t in self.tool_registry.list_tools() if t.enabled] if self.tool_registry else []
             lines.append(f"  [✓] Discovered Tools: {len(tools)} across OpenClaw, Hermes, Pi, and Omni")
             return True, "\n".join(lines)
 
@@ -803,7 +829,6 @@ class CommandExecutor:
         elif name == "bash":
             if not arg:
                 return True, "Usage: /bash <command>"
-            import subprocess
             res = subprocess.run(arg, shell=True, capture_output=True, text=True, timeout=30)
             out = res.stdout.strip() or res.stderr.strip() or "(no output)"
             return True, f"[bash exit {res.returncode}]\n{out}"

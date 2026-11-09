@@ -58,7 +58,7 @@ class TestCommandProfiles(unittest.TestCase):
         self.assertIn("gateway", active_claw)
         self.assertIn("cron", active_claw)
         self.assertIn("doctor", active_claw)
-        self.assertNotIn("compact", active_claw)
+        self.assertNotIn("cleanse", active_claw)
         self.assertNotIn("curator", active_claw)
 
         # 5. FULL Profile: all commands

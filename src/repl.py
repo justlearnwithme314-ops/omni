@@ -283,20 +283,26 @@ async def run_rich_repl(
                 break
 
             # Handle Slash Commands via CommandExecutor
+            # Handle Slash Commands strictly locally (NEVER forward /commands to LLM)
             if line.startswith("/"):
                 def set_model_cb(new_m):
                     nonlocal active_model
                     active_model = router.resolve_model(new_m)
 
+                def set_mode_cb(new_mode_name):
+                    nonlocal active_mode
+                    active_mode = new_mode_name
+
                 handled, cmd_msg = await cmd_executor.execute(
-                    line, session_state, context={"switch_model": set_model_cb}
+                    line, session_state, context={"switch_model": set_model_cb, "switch_mode": set_mode_cb}
                 )
                 if handled:
                     if cmd_msg:
                         print(cmd_msg)
-                    continue
+                else:
+                    print(f"[!] Unknown slash command '{line.split()[0]}'. Type /help for available commands.")
+                continue
 
-            # Run conversational turn with Live Streaming Spinner
             spinner = LiveStreamingSpinner(f"[{model_short}] Generating response...")
             spinner.start()
             try:

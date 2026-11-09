@@ -202,6 +202,7 @@ CLI_SUBCOMMANDS: Dict[str, str] = {
 # All Slash Commands Catalog
 # ---------------------------------------------------------------------------
 ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
+    {"name": "diff", "category": "omp", "description": "View syntax-highlighted git diff of recent turn modifications", "usage": "/diff"},
     {"name": "skin", "category": "core", "description": "View or switch truecolor themes (tokyo-night, catppuccin, matrix, nord, solarized)", "usage": "/skin [name]"},
     {"name": "split", "category": "omp", "description": "Render split-screen dual pane layout (pi-tui style)", "usage": "/split"},
     {"name": "prewalk", "category": "omp", "description": "Run 2-stage fast-model prewalk and smart-model code handoff", "usage": "/prewalk <task>"},
@@ -216,12 +217,12 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "queue", "category": "openclaw", "description": "Adjust turn queue settings (fifo, steer, drop)", "usage": "/queue [mode]"},
     {"name": "exec", "category": "openclaw", "description": "Configure execution environment defaults (cwd, env)", "usage": "/exec [defaults]"},
     {"name": "elevated", "category": "openclaw", "description": "Toggle elevated execution permissions (sudo/admin)", "usage": "/elevated [on|off]"},
-    {"name": "reasoning", "category": "openclaw", "description": "Toggle reasoning/thinking visibility in output", "usage": "/reasoning [on|off]"},
-    {"name": "fast", "category": "openclaw", "description": "Toggle fast priority inference mode", "usage": "/fast [on|off]"},
+    {"name": "reasoning", "category": "hermes", "description": "Toggle reasoning/thinking visibility in output", "usage": "/reasoning [on|off]"},
+    {"name": "fast", "category": "hermes", "description": "Toggle fast priority inference mode", "usage": "/fast [on|off]"},
     {"name": "trace", "category": "openclaw", "description": "Toggle plugin trace lines in the transcript", "usage": "/trace [on|off]"},
     {"name": "verbose", "category": "openclaw", "description": "Toggle verbose execution logging mode", "usage": "/verbose [on|off]"},
     {"name": "think", "category": "openclaw", "description": "Set model thinking level (xhigh, max, adaptive, off)", "usage": "/think [level]"},
-    {"name": "compact", "category": "openclaw", "description": "Trigger manual context compaction", "usage": "/compact"},
+    {"name": "compact", "category": "omp", "description": "Trigger manual context compaction", "usage": "/compact"},
     {"name": "name", "category": "openclaw", "description": "Name or rename the active session", "usage": "/name <title>"},
     {"name": "send", "category": "openclaw", "description": "Control outbound message delivery policy (allow/deny)", "usage": "/send [allow|deny|inherit]"},
     {"name": "activation", "category": "openclaw", "description": "Set group chat activation mode (mention, all, steer)", "usage": "/activation [mention|all|steer]"},
@@ -249,11 +250,10 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "diagnostics", "category": "openclaw", "description": "Request Gateway diagnostics and feedback bundle export", "usage": "/diagnostics [note]"},
     {"name": "goal", "category": "openclaw", "description": "Show or control the active autonomous goal", "usage": "/goal [status|start|edit|pause|resume|complete|block|clear]"},
     {"name": "loop", "category": "openclaw", "description": "Run and manage recurring autonomous prompts", "usage": "/loop [interval] <prompt>"},
-    {"name": "learn", "category": "openclaw", "description": "Save lessons from recent work to skills or memory", "usage": "/learn [request]"},
+    {"name": "learn", "category": "hermes", "description": "Save lessons from recent work to skills or memory", "usage": "/learn [request]"},
     {"name": "dashboard", "category": "openclaw", "description": "Create or update this session's web dashboard view", "usage": "/dashboard [request]"},
     {"name": "skill", "category": "openclaw", "description": "Run an OpenClaw skill directly by name", "usage": "/skill <name> [input]"},
-    {"name": "commands", "category": "openclaw", "description": "List all OpenClaw slash commands", "usage": "/commands"},
-
+    {"name": "commands", "category": "core", "description": "List all OpenClaw slash commands", "usage": "/commands"},
     {"name": "clear", "category": "core", "description": "Core command", "usage": "/clear"},
     {"name": "exit", "category": "core", "description": "Core command", "usage": "/exit"},
     {"name": "help", "category": "core", "description": "Core command", "usage": "/help"},
@@ -268,9 +268,8 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "m", "category": "pi", "description": "Pi coding command", "usage": "/m"},
     {"name": "new", "category": "pi", "description": "Pi coding command", "usage": "/new"},
     {"name": "plugins", "category": "pi", "description": "Pi coding command", "usage": "/plugins"},
-    {"name": "session", "category": "pi", "description": "Pi coding command", "usage": "/session"},
-    {"name": "tokens", "category": "pi", "description": "Pi coding command", "usage": "/tokens"},
-    {"name": "tools", "category": "pi", "description": "Pi coding command", "usage": "/tools"},
+    {"name": "tokens", "category": "core", "description": "Pi coding command", "usage": "/tokens"},
+    {"name": "tools", "category": "core", "description": "Pi coding command", "usage": "/tools"},
     {"name": "undo", "category": "pi", "description": "Pi coding command", "usage": "/undo"},
     {"name": "moa", "category": "hermes", "description": "Convene Mixture-of-Agents multi-model reasoning council", "usage": "/moa <query>"},
     {"name": "egress", "category": "hermes", "description": "Configure iron-proxy egress credential firewall whitelist", "usage": "/egress [status|allow <domain>]"},
@@ -280,10 +279,7 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "pet", "category": "hermes", "description": "Interact with Petdex terminal companion mascot", "usage": "/pet"},
     {"name": "hatch", "category": "hermes", "description": "Hatch a new Petdex companion mascot", "usage": "/hatch"},
     {"name": "curator", "category": "hermes", "description": "Extract and synthesize facts from current conversation into memory graph", "usage": "/curator"},
-    {"name": "fast", "category": "hermes", "description": "Quickly switch to fast model tier (e.g. gemini-2.5-flash)", "usage": "/fast"},
-    {"name": "learn", "category": "hermes", "description": "Run Hermes self-evolution optimizer on failed session trajectories", "usage": "/learn"},
     {"name": "memory", "category": "hermes", "description": "Inspect Mnemopi semantic knowledge graph assertions", "usage": "/memory"},
-    {"name": "reasoning", "category": "hermes", "description": "Configure chain-of-thought visibility and model reasoning parameters", "usage": "/reasoning"},
     {"name": "rollback", "category": "hermes", "description": "Rewind conversation turn history to turn N", "usage": "/rollback"},
     {"name": "smart", "category": "hermes", "description": "Quickly switch to smart reasoning model tier (e.g. claude-sonnet)", "usage": "/smart"},
     {"name": "snapshot", "category": "hermes", "description": "Create an immutable named snapshot of session state and files", "usage": "/snapshot"},
@@ -297,24 +293,20 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "add", "category": "omp", "description": "Add an SSH host", "usage": "/add"},
     {"name": "add-dir", "category": "omp", "description": "Add a workspace directory to this session (multi-root)", "usage": "/add-dir"},
     {"name": "advisor", "category": "omp", "description": "Toggle the advisor (a second model that reviews each turn and injects notes)", "usage": "/advisor"},
-    {"name": "agents", "category": "omp", "description": "Open the agents hub (per-agent model, prewalk, and advisor)", "usage": "/agents"},
     {"name": "all", "category": "omp", "description": "Write a zip with the main transcript, LLM request JSON, and one file per subagent", "usage": "/all"},
     {"name": "anon", "category": "omp", "description": "Write a zip of anonymized session JSONL (contents redacted, metadata kept) plus subagents", "usage": "/anon"},
     {"name": "append", "category": "omp", "description": "Append a task; phase fuzzy-matched or auto-created", "usage": "/append"},
     {"name": "branch", "category": "omp", "description": "Rewind to a previous message, keeping the old path as a branch", "usage": "/branch"},
     {"name": "browser", "category": "omp", "description": "Toggle browser eval-prelude headless vs visible mode", "usage": "/browser"},
-    {"name": "btw", "category": "omp", "description": "Ask a side question, or browse this session", "usage": "/btw"},
     {"name": "budget", "category": "omp", "description": "Adjust the token budget", "usage": "/budget"},
     {"name": "cancel", "category": "omp", "description": "Cancel a running native scan", "usage": "/cancel"},
     {"name": "changelog", "category": "omp", "description": "Show changelog entries", "usage": "/changelog"},
     {"name": "cleanse", "category": "omp", "description": "Detect and fix project diagnostics with weighted parallel subagents", "usage": "/cleanse"},
     {"name": "collab", "category": "omp", "description": "Share this session live via a relay", "usage": "/collab"},
     {"name": "collapse", "category": "omp", "description": "Restore the bounded HUD preview", "usage": "/collapse"},
-    {"name": "compact", "category": "omp", "description": "Manually compact the session context", "usage": "/compact"},
     {"name": "compare", "category": "omp", "description": "Compare finding lineage across two scans", "usage": "/compare"},
     {"name": "computer", "category": "omp", "description": "Toggle the native computer-use eval prelude for this session", "usage": "/computer"},
     {"name": "configure", "category": "omp", "description": "Open the advisor configuration editor (TUI)", "usage": "/configure"},
-    {"name": "context", "category": "omp", "description": "Browse context usage and detailed content", "usage": "/context"},
     {"name": "copy", "category": "omp", "description": "Pick text or code from the conversation to copy", "usage": "/copy"},
     {"name": "debug", "category": "omp", "description": "Open debug tools selector", "usage": "/debug"},
     {"name": "delete", "category": "omp", "description": "Delete the current session and start a new one", "usage": "/delete"},
@@ -336,10 +328,8 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "extensions", "category": "omp", "description": "Open Extension Control Center dashboard", "usage": "/extensions"},
     {"name": "force", "category": "omp", "description": "Force next turn to use a specific tool", "usage": "/force"},
     {"name": "forget-approvals", "category": "omp", "description": "Forget every file and folder approval Ask and remember has recorded", "usage": "/forget-approvals"},
-    {"name": "fork", "category": "omp", "description": "Fork this session, or open it in a multiplexer pane or window", "usage": "/fork"},
     {"name": "full", "category": "omp", "description": "Show full, untruncated command lines", "usage": "/full"},
     {"name": "git", "category": "omp", "description": "Open the git UI (split diff viewer, staging, commit composer)", "usage": "/git"},
-    {"name": "goal", "category": "omp", "description": "Toggle goal mode (persistent autonomous objective for this session)", "usage": "/goal"},
     {"name": "guided-goal", "category": "omp", "description": "Have the agent interview you in chat, then set up goal mode", "usage": "/guided-goal"},
     {"name": "handoff", "category": "omp", "description": "Summarize the session into a handoff document and compact in place", "usage": "/handoff"},
     {"name": "headless", "category": "omp", "description": "Switch to headless mode", "usage": "/headless"},
@@ -357,9 +347,7 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "list", "category": "omp", "description": "List active local Collab hosts (no links; use `omp collab link`)", "usage": "/list"},
     {"name": "live", "category": "omp", "description": "Start Codex-backed realtime voice mode", "usage": "/live"},
     {"name": "local", "category": "omp", "description": "Open a session local:// file in $EDITOR (picker when no name given)", "usage": "/local"},
-    {"name": "login", "category": "omp", "description": "Login with OAuth provider", "usage": "/login"},
     {"name": "logout", "category": "omp", "description": "Logout from OAuth provider", "usage": "/logout"},
-    {"name": "loop", "category": "omp", "description": "Queue a message for after the agent yields", "usage": "/loop"},
     {"name": "marketplace", "category": "omp", "description": "Manage marketplace plugin sources and installed plugins", "usage": "/marketplace"},
     {"name": "mcp", "category": "omp", "description": "Manage MCP servers (add, list, remove, test)", "usage": "/mcp"},
     {"name": "modelpreset", "category": "omp", "description": "Save and switch model presets (role models + thinking level)", "usage": "/modelpreset"},
@@ -374,10 +362,8 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "pin", "category": "omp", "description": "Pin or unpin a session at the top of the resume list", "usage": "/pin"},
     {"name": "plan", "category": "omp", "description": "Create an immutable security scan plan", "usage": "/plan"},
     {"name": "plan-review", "category": "omp", "description": "Re-open the plan review for the latest plan (plan mode only)", "usage": "/plan-review"},
-    {"name": "prewalk", "category": "omp", "description": "Arm, restart, or cancel a one-shot model handoff", "usage": "/prewalk"},
     {"name": "prompts", "category": "omp", "description": "List available prompts from connected servers", "usage": "/prompts"},
     {"name": "providers", "category": "omp", "description": "Configure sign-in and web search providers", "usage": "/providers"},
-    {"name": "queue", "category": "omp", "description": "Show pending memory deltas awaiting consolidation", "usage": "/queue"},
     {"name": "ratchet", "category": "omp", "description": "Build (or reuse) an eval for an LLM flow, then hillclimb it unattended", "usage": "/ratchet"},
     {"name": "reauth", "category": "omp", "description": "Reauthorize OAuth for a server", "usage": "/reauth"},
     {"name": "rebuild", "category": "omp", "description": "Alias for enqueue", "usage": "/rebuild"},
@@ -389,7 +375,6 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "remove-dir", "category": "omp", "description": "Remove a workspace directory from this session", "usage": "/remove-dir"},
     {"name": "rename", "category": "omp", "description": "Rename the current session (omit title to generate)", "usage": "/rename"},
     {"name": "resources", "category": "omp", "description": "List available resources from connected servers", "usage": "/resources"},
-    {"name": "restart", "category": "omp", "description": "Restart omp with the same launch flags, resuming this session and its running subagents", "usage": "/restart"},
     {"name": "resume", "category": "omp", "description": "Resume a different session", "usage": "/resume"},
     {"name": "retry", "category": "omp", "description": "Retry the last failed agent turn", "usage": "/retry"},
     {"name": "rm", "category": "omp", "description": "Remove task/phase/all (fuzzy-matched)", "usage": "/rm"},
@@ -397,7 +382,6 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "scan", "category": "omp", "description": "Start a planned or newly planned native scan", "usage": "/scan"},
     {"name": "scans", "category": "omp", "description": "List stored project security scans", "usage": "/scans"},
     {"name": "search", "category": "omp", "description": "Search the skill registry", "usage": "/search"},
-    {"name": "security", "category": "omp", "description": "Plan, run, inspect, import, and compare OMP-native security scans", "usage": "/security"},
     {"name": "set", "category": "omp", "description": "Set or replace the goal", "usage": "/set"},
     {"name": "settings", "category": "omp", "description": "Open settings menu", "usage": "/settings"},
     {"name": "setup", "category": "omp", "description": "Open provider setup", "usage": "/setup"},
@@ -413,7 +397,6 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "ssh", "category": "omp", "description": "Manage SSH hosts (add, list, remove)", "usage": "/ssh"},
     {"name": "start", "category": "omp", "description": "Mark task in_progress (fuzzy-matched)", "usage": "/start"},
     {"name": "stats", "category": "omp", "description": "Show memory backend statistics", "usage": "/stats"},
-    {"name": "stop", "category": "omp", "description": "Stop sharing", "usage": "/stop"},
     {"name": "switch", "category": "omp", "description": "Toggle fast service (OpenAI service_tier=priority or ultrafast, Anthropic speed=fast, Goog", "usage": "/switch"},
     {"name": "sync", "category": "omp", "description": "Run memory consolidation now", "usage": "/sync"},
     {"name": "tab", "category": "omp", "description": "Alias for window", "usage": "/tab"},
@@ -421,15 +404,12 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "test", "category": "omp", "description": "Test connection to a server", "usage": "/test"},
     {"name": "thinking", "category": "omp", "description": "Drop all thinking blocks", "usage": "/thinking"},
     {"name": "todo", "category": "omp", "description": "View or modify the agent", "usage": "/todo"},
-    {"name": "trace", "category": "omp", "description": "Open this session", "usage": "/trace"},
     {"name": "tree", "category": "omp", "description": "Navigate session tree (switch branches)", "usage": "/tree"},
     {"name": "ultra", "category": "omp", "description": "Enable Ultrafast (OpenAI API, or Codex and relay models that offer it)", "usage": "/ultra"},
     {"name": "unauth", "category": "omp", "description": "Remove OAuth auth from a server", "usage": "/unauth"},
     {"name": "uninstall", "category": "omp", "description": "Uninstall a plugin (selector if no args)", "usage": "/uninstall"},
     {"name": "unpin", "category": "omp", "description": "Unpin a session from the top of the resume list", "usage": "/unpin"},
-    {"name": "update", "category": "omp", "description": "Update marketplace catalog(s)", "usage": "/update"},
     {"name": "upgrade", "category": "omp", "description": "Upgrade outdated plugins", "usage": "/upgrade"},
-    {"name": "usage", "category": "omp", "description": "Show provider usage and limits", "usage": "/usage"},
     {"name": "validate", "category": "omp", "description": "Validate one finding with OMP-native tools", "usage": "/validate"},
     {"name": "vibe", "category": "omp", "description": "Toggle vibe mode (direct persistent fast/good worker sessions; read-only toolset)", "usage": "/vibe"},
     {"name": "view", "category": "omp", "description": "Share a read-only link (guests can watch, not prompt)", "usage": "/view"},
@@ -437,8 +417,6 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
     {"name": "window", "category": "omp", "description": "Open the fork in a new multiplexer window", "usage": "/window"},
     {"name": "wt", "category": "omp", "description": "Move this session into a new worktree, changes included", "usage": "/wt"},
 ]
-
-
 
 OPENCLAW_COMMAND_NAMES: Set[str] = {
     "commands", "skill", "dashboard", "learn", "loop", "status", "goal", "diagnostics", "login",
@@ -463,7 +441,7 @@ class CommandRegistry:
                     saved_prof = json.load(f).get("command_profile", "full")
             except Exception:
                 pass
-        self.active_profile = active_profile if active_profile != "full" else (saved_prof if saved_prof in COMMAND_PROFILES else "full")
+        self.active_profile = active_profile or saved_prof or "full"
         self.commands: Dict[str, CommandDefinition] = {}
         self._init_commands()
         self.apply_profile(self.active_profile)
@@ -490,10 +468,7 @@ class CommandRegistry:
         allowed = prof["allowed_categories"]
 
         for cmd in self.commands.values():
-            if profile_name.lower() == "openclaw" and cmd.name in OPENCLAW_COMMAND_NAMES:
-                cmd.enabled = True
-            else:
-                cmd.enabled = cmd.category in allowed
+            cmd.enabled = cmd.category in allowed
 
         cfg_path = Path(__file__).resolve().parent.parent.parent / "omni.config.json"
         try:

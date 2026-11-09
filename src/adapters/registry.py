@@ -314,45 +314,41 @@ class MasterToolRegistry:
         ]
 
     def discover_all(self) -> DiscoveryResult:
-        """Discover tools across all enabled plugin systems and register native tools."""
+        """Discover tools across all plugin systems and apply active feature toggles."""
         # 1. Native core tools
         self._register_native_tools()
 
-        # 2. OpenClaw adapter
-        if self._is_feature_enabled("plugins_openclaw"):
-            try:
-                claw_tools = self.openclaw_adapter.discover()
-                for tool in claw_tools:
-                    self.register_tool(tool)
-            except Exception as e:
-                logger.error(f"Error during OpenClaw tool discovery: {e}", exc_info=True)
+        # 2. OpenClaw adapter (discover all available skills into registry)
+        try:
+            claw_tools = self.openclaw_adapter.discover()
+            for tool in claw_tools:
+                self.register_tool(tool)
+        except Exception as e:
+            logger.error(f"Error during OpenClaw tool discovery: {e}", exc_info=True)
 
-        # 3. Hermes adapter
-        if self._is_feature_enabled("plugins_hermes"):
-            try:
-                hermes_tools = self.hermes_adapter.discover()
-                for tool in hermes_tools:
-                    self.register_tool(tool)
-            except Exception as e:
-                logger.error(f"Error during Hermes tool discovery: {e}", exc_info=True)
+        # 3. Hermes adapter (discover all available plugins into registry)
+        try:
+            hermes_tools = self.hermes_adapter.discover()
+            for tool in hermes_tools:
+                self.register_tool(tool)
+        except Exception as e:
+            logger.error(f"Error during Hermes tool discovery: {e}", exc_info=True)
 
-        # 4. Pi adapter
-        if self._is_feature_enabled("plugins_pi"):
-            try:
-                pi_tools = self.pi_adapter.discover()
-                for tool in pi_tools:
-                    self.register_tool(tool)
-            except Exception as e:
-                logger.error(f"Error during Pi tool discovery: {e}", exc_info=True)
+        # 4. Pi adapter (discover all available extensions into registry)
+        try:
+            pi_tools = self.pi_adapter.discover()
+            for tool in pi_tools:
+                self.register_tool(tool)
+        except Exception as e:
+            logger.error(f"Error during Pi tool discovery: {e}", exc_info=True)
 
         # 5. MCP adapter
-        if self._is_feature_enabled("plugins_mcp"):
-            try:
-                mcp_tools = self.mcp_adapter.discover()
-                for tool in mcp_tools:
-                    self.register_tool(tool)
-            except Exception as e:
-                logger.error(f"Error during MCP tool discovery: {e}", exc_info=True)
+        try:
+            mcp_tools = self.mcp_adapter.discover()
+            for tool in mcp_tools:
+                self.register_tool(tool)
+        except Exception as e:
+            logger.error(f"Error during MCP tool discovery: {e}", exc_info=True)
 
         # 6. Native Omni Custom Plugins (plugins/omni/)
         try:
@@ -362,6 +358,9 @@ class MasterToolRegistry:
                 self.register_tool(tool)
         except Exception as e:
             logger.debug(f"OmniAdapter custom plugin error: {e}")
+
+        # Apply active feature toggles to mark tools enabled or disabled
+        self.apply_feature_toggles(self.config)
 
         return DiscoveryResult(self.list_tools())
 
