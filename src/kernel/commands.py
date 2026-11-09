@@ -202,6 +202,7 @@ CLI_SUBCOMMANDS: Dict[str, str] = {
 # All Slash Commands Catalog
 # ---------------------------------------------------------------------------
 ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
+    {"name": "clear-user-history", "category": "core", "description": "Wipe user prompt input history file (~/.omni_history) and reset ghost suggestions", "usage": "/clear-user-history [keep_last]", "aliases": ["/clear-history"]},
     {"name": "diff", "category": "omp", "description": "View syntax-highlighted git diff of recent turn modifications", "usage": "/diff"},
     {"name": "skin", "category": "core", "description": "View or switch truecolor themes (tokyo-night, catppuccin, matrix, nord, solarized)", "usage": "/skin [name]"},
     {"name": "split", "category": "omp", "description": "Render split-screen dual pane layout (pi-tui style)", "usage": "/split"},

@@ -294,7 +294,7 @@ async def run_rich_repl(
                     active_mode = new_mode_name
 
                 handled, cmd_msg = await cmd_executor.execute(
-                    line, session_state, context={"switch_model": set_model_cb, "switch_mode": set_mode_cb}
+                    line, session_state, context={"switch_model": set_model_cb, "switch_mode": set_mode_cb, "clear_prompt_history": lambda: (hasattr(session, 'history') and hasattr(session.history, '_loaded_strings') and session.history._loaded_strings.clear())}
                 )
                 if handled:
                     if cmd_msg:

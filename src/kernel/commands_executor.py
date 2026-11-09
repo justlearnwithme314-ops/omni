@@ -138,6 +138,39 @@ class CommandExecutor:
             est_tokens = getattr(state, "token_count", 0)
             return True, f"Session Tokens: ~{est_tokens:,} tokens across {msg_count} messages."
 
+        elif name in ("clear-user-history", "clear_user_history", "clear-history", "clear_history"):
+            from pathlib import Path
+            hist_path = Path.home() / ".omni_history"
+            count = 0
+            keep_last = int(arg) if arg and arg.isdigit() else 0
+
+            if hist_path.exists():
+                try:
+                    with open(hist_path, "r", encoding="utf-8", errors="ignore") as f:
+                        lines = f.readlines()
+                    count = len(lines)
+                    if keep_last <= 0:
+                        with open(hist_path, "w", encoding="utf-8") as f:
+                            f.truncate(0)
+                        msg = f"[✓] Wiped all {count} entries from ~/.omni_history.\n[✓] Ghost auto-suggestions have been completely reset."
+                    else:
+                        preserved = lines[-keep_last:]
+                        with open(hist_path, "w", encoding="utf-8") as f:
+                            f.writelines(preserved)
+                        msg = f"[✓] Kept last {len(preserved)} entries; removed {count - len(preserved)} entries from ~/.omni_history."
+                except Exception as e:
+                    return True, f"[!] Error clearing history: {e}"
+            else:
+                msg = "[i] Input history is already empty."
+
+            if context and "clear_prompt_history" in context:
+                try:
+                    context["clear_prompt_history"]()
+                except Exception:
+                    pass
+
+            return True, msg
+
         elif name in ("plugins", "extensions"):
             from pathlib import Path
             from .features import FeatureRegistry
