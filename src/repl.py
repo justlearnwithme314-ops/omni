@@ -241,7 +241,7 @@ async def run_rich_repl(
         try:
             t = tm.get_theme()
             model_short = active_model.split("/")[-1]
-            tool_count = len(tool_registry.list_tools()) if tool_registry else 0
+            tool_count = len([t for t in tool_registry.list_tools() if t.enabled]) if tool_registry else 0
 
             # OMP-style 2-line HUD prompt with active theme colors (using safe FormattedText)
             from prompt_toolkit.formatted_text import FormattedText

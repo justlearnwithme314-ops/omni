@@ -58,7 +58,8 @@ def render_omni_dashboard(config=None, model="google-antigravity/gemini-2.5-flas
         table.add_column(style="bright_white")
 
         table.add_row("⚡ Active Model:", model)
-        table.add_row("⚙ Profile Mode:", f"{profile.upper()} [dim]({tools_count} tools active • OpenClaw + Hermes + Pi)[/dim]")
+        badge = f"{tools_count} core tools active" if profile.lower() == "lean" else f"{tools_count} tools active • OpenClaw + Hermes + Pi"
+        table.add_row("⚙ Profile Mode:", f"{profile.upper()} [dim]({badge})[/dim]")
         table.add_row("🔑 Keyring Auth:", f"[bold {active_theme.success}][✓][/bold {active_theme.success}] Google OAuth (Connected)")
         table.add_row("🎨 Visual Theme:", f"{active_theme.name.title()} [dim](type /skin to change)[/dim]")
 
@@ -116,7 +117,12 @@ async def async_run(args, config: HarnessConfig):
     active_model = router.resolve_model(raw_model)
 
     profile = mode_mgr.get_profile()
-    tool_count = len(tool_registry.list_tools()) if tool_registry else 0
+    if tool_registry:
+        from .kernel.features import FeatureRegistry
+        f_reg = FeatureRegistry(config_data=getattr(config, "config_data", {}), config_path=getattr(config, "config_path", None))
+        f_reg.apply_profile(profile.name.lower())
+        tool_registry.apply_feature_toggles(f_reg)
+    tool_count = len([t for t in tool_registry.list_tools() if t.enabled]) if tool_registry else 0
     render_omni_dashboard(config=config, model=active_model, profile=profile.name, tools_count=tool_count)
 
     prompt_val = getattr(args, "prompt", None)
