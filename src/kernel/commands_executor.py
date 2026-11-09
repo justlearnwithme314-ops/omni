@@ -736,6 +736,11 @@ class CommandExecutor:
         # ===================================================================
         elif name in ("skin", "theme"):
             from ..features.themes import ThemeManager, THEMES
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.table import Table
+            from rich import box
+
             tm = ThemeManager()
             if not arg:
                 lines = [f"\nActive Theme: {tm.active_theme_name.upper()}", "Available Truecolor Themes:"]
@@ -744,8 +749,31 @@ class CommandExecutor:
                     lines.append(f" {m}{t.name:<16} - {t.description}")
                 lines.append("\nUsage: /skin <tokyo-night|catppuccin|matrix|nord|solarized>")
                 return True, "\n".join(lines)
+
             if tm.set_theme(arg):
-                return True, f"[✓] Applied Truecolor Theme: {arg.upper()} ({THEMES[arg.lower()].description})"
+                t = THEMES[arg.lower()]
+                state.scratchpad["active_skin"] = t.name
+                c = Console(safe_box=False)
+                table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+                table.add_column(width=20)
+                table.add_column()
+                table.add_row(f"[bold {t.primary}]● Primary Accent[/]", f"[{t.primary}]{t.primary} (Prompts & Titles)[/]")
+                table.add_row(f"[bold {t.secondary}]● Secondary Color[/]", f"[{t.secondary}]{t.secondary} (Headers & Accents)[/]")
+                table.add_row(f"[bold {t.accent}]● Diamond Highlight[/]", f"[{t.accent}]{t.accent} (Icons & Focus)[/]")
+                table.add_row(f"[bold {t.success}]● Success Output[/]", f"[{t.success}]{t.success} (Tool Results)[/]")
+                table.add_row(f"[bold {t.warning}]● Tool Call Alert[/]", f"[{t.warning}]{t.warning} (Invocations)[/]")
+
+                panel = Panel(
+                    table,
+                    title=f"[bold {t.primary}]🎨 Theme Applied: {t.name.upper()}[/bold {t.primary}]",
+                    border_style=t.panel_border,
+                    box=box.ROUNDED,
+                    padding=(1, 2)
+                )
+                c.print()
+                c.print(panel)
+                c.print()
+                return True, f"[✓] Applied Truecolor Theme: {t.name.upper()} ({t.description})"
             return True, f"[!] Unknown theme '{arg}'. Available: {list(THEMES.keys())}"
 
         elif name == "split":

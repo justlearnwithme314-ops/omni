@@ -192,29 +192,46 @@ async def run_rich_repl(
             session = None
 
     def get_bottom_toolbar():
+        from .features.themes import ThemeManager
+        t = ThemeManager().get_theme()
         tool_count = len(tool_registry.list_tools()) if tool_registry else 0
         keys_count = len(router.keyring.get_active_unblocked_keys("google-antigravity")) + len(router.keyring.get_active_unblocked_keys("anthropic"))
         model_short = active_model.split("/")[-1]
         return HTML(
-            f" <b>Model:</b> <style color='#00ffff'>{model_short}</style> │ "
-            f"<b>Mode:</b> <style color='#55ff55'>{active_mode.upper()}</style> │ "
+            f" <b>Model:</b> <style color='{t.primary}'>{model_short}</style> │ "
+            f"<b>Mode:</b> <style color='{t.success}'>{active_mode.upper()}</style> │ "
+            f"<b>Skin:</b> <style color='{t.accent}'>{t.name}</style> │ "
             f"<b>Tools:</b> {tool_count} │ "
             f"<b>Keys:</b> {keys_count} active │ "
             f"<i>Type /help for commands</i> "
         )
 
-        
     session_state = SessionState()
 
     while True:
         try:
+            from .features.themes import ThemeManager
+            t = ThemeManager().get_theme()
             model_short = active_model.split("/")[-1]
-            prompt_str = f"◆ [{model_short}] ❯ "
+            prompt_html = HTML(
+                f"<prompt-icon>◆</prompt-icon> "
+                f"<prompt-model>[{model_short}]</prompt-model> "
+                f"<prompt-theme>({t.name})</prompt-theme> "
+                f"<prompt-arrow>❯</prompt-arrow> "
+            )
+            dynamic_style = Style.from_dict({
+                "prompt-icon": f"{t.accent} bold",
+                "prompt-model": f"{t.primary} bold",
+                "prompt-theme": f"{t.secondary} italic",
+                "prompt-arrow": f"{t.primary} bold",
+                "bottom-toolbar": f"{t.text} bg:#1c1d21",
+            })
+            fallback_prompt_str = f"◆ [{model_short}] ({t.name}) ❯ "
 
             if session:
-                line = await session.prompt_async(prompt_str, bottom_toolbar=get_bottom_toolbar)
+                line = await session.prompt_async(prompt_html, bottom_toolbar=get_bottom_toolbar, style=dynamic_style)
             else:
-                line = input(prompt_str)
+                line = input(fallback_prompt_str)
 
             line = line.strip()
             if not line:
