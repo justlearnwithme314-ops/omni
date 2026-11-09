@@ -224,12 +224,16 @@ async def run_rich_repl(
         think = session_state.scratchpad.get("thinking_budget", "high")
         t = tm.get_theme()
 
-        return HTML(
-            f" <style color='#00bfff' bold>{m_display}</style> │ "
-            f"<style color='#9ece6a'>{pct}% / {max_tok}</style> │ "
-            f"<style color='#bb9af7'>{cwd_disp}</style>                      "
-            f"<style color='#e0af68'>thinking: {think}</style> "
-        )
+        from prompt_toolkit.formatted_text import FormattedText
+        return FormattedText([
+            (f"bold {t.primary}", f" {m_display} "),
+            ("#555555", "│ "),
+            (f"{t.success}", f"{pct}% / {max_tok} "),
+            ("#555555", "│ "),
+            (f"{t.secondary}", f"{cwd_disp} "),
+            ("", "                     "),
+            (f"{t.warning}", f"thinking: {think} "),
+        ])
 
     session_state = SessionState()
 
@@ -239,26 +243,21 @@ async def run_rich_repl(
             model_short = active_model.split("/")[-1]
             tool_count = len(tool_registry.list_tools()) if tool_registry else 0
 
-            # OMP-style 2-line HUD prompt with active theme colors
-            prompt_html = HTML(
-                f"<hud-bracket>╭─</hud-bracket> "
-                f"<hud-model>[{model_short}]</hud-model> "
-                f"<hud-sep>•</hud-sep> "
-                f"<hud-profile>{active_mode.upper()}</hud-profile> "
-                f"<hud-sep>•</hud-sep> "
-                f"<hud-tools>{tool_count} tools</hud-tools> "
-                f"<hud-sep>•</hud-sep> "
-                f"<hud-skin>{t.name}</hud-skin>\n"
-                f"<hud-bracket>╰─❯</hud-bracket> "
-            )
+            # OMP-style 2-line HUD prompt with active theme colors (using safe FormattedText)
+            from prompt_toolkit.formatted_text import FormattedText
+            prompt_fragments = FormattedText([
+                (f"bold {t.secondary}", "╭─ "),
+                (f"bold {t.primary}", f"[{model_short}] "),
+                ("#555555", "• "),
+                (f"bold {t.success}", f"{active_mode.upper()} "),
+                ("#555555", "• "),
+                (f"{t.text}", f"{tool_count} tools "),
+                ("#555555", "• "),
+                (f"italic {t.accent}", f"{t.name}\n"),
+                (f"bold {t.primary}", "╰─❯ "),
+            ])
 
             dynamic_style = Style.from_dict({
-                "hud-bracket": f"{t.secondary} bold",
-                "hud-model": f"{t.primary} bold",
-                "hud-sep": "#555555",
-                "hud-profile": f"{t.success} bold",
-                "hud-tools": f"{t.text}",
-                "hud-skin": f"{t.accent} italic",
                 "completion-menu": f"bg:#1f2026 {t.text}",
                 "completion-menu.completion": f"bg:#1f2026 {t.text}",
                 "completion-menu.completion.current": f"bg:{t.primary} #000000 bold",
@@ -271,7 +270,7 @@ async def run_rich_repl(
             fallback_prompt_str = f"╭─ [{model_short}] ({t.name})\n╰─❯ "
 
             if session:
-                line = await session.prompt_async(prompt_html, bottom_toolbar=get_bottom_toolbar, style=dynamic_style)
+                line = await session.prompt_async(prompt_fragments, bottom_toolbar=get_bottom_toolbar, style=dynamic_style)
             else:
                 line = input(fallback_prompt_str)
 
