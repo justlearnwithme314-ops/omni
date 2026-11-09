@@ -18,10 +18,11 @@ from .client import (
     UnifiedLLMClient,
 )
 from .keyring import Keyring
+from ..paths import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CONFIG_PATH = r"D:\Harness\omni-harness\harness.config.json"
+DEFAULT_CONFIG_PATH = str(PROJECT_ROOT / "harness.config.json")
 
 DEFAULT_TIERS: dict[str, list[str]] = {
     "fast": [

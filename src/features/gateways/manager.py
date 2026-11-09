@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import logging
 from typing import Callable, Dict, List, Optional
 
-from .base import BaseChatGateway, InboundChatMessage
+from .base import BaseChatGateway, GatewayNotConfigured, InboundChatMessage
 from .telegram import TelegramChatGateway
 from .discord import DiscordChatGateway
 from .slack_whatsapp import SlackChatGateway, WhatsAppChatGateway
@@ -29,30 +29,29 @@ class ChatGatewayManager:
         logger.info(f"GatewayManager: Inbound message from {msg.platform} user {msg.sender_name}: {msg.content}")
         return self.message_router(msg)
 
-    def start_gateway(self, platform: str) -> bool:
-        """Start a specific platform gateway."""
-        gw = self.gateways.get(platform.lower())
-        if gw:
+    def start_gateway(self, platform: str) -> str:
+        """Start one gateway; returns a human-readable status line (raises KeyError for unknown platforms)."""
+        gw = self.gateways[platform.lower()]
+        try:
             gw.start()
-            return True
-        return False
+        except GatewayNotConfigured as e:
+            return f"{platform}: not started - {e}"
+        mode = "receiving + sending" if gw.inbound else f"sending only ({gw.inbound_note})"
+        return f"{platform}: started, {mode}"
 
-    def stop_gateway(self, platform: str) -> bool:
-        """Stop a specific platform gateway."""
-        gw = self.gateways.get(platform.lower())
-        if gw:
-            gw.stop()
-            return True
-        return False
+    def stop_gateway(self, platform: str) -> None:
+        self.gateways[platform.lower()].stop()
 
-    def start_all(self):
-        for gw in self.gateways.values():
-            gw.start()
+    def start_all(self) -> List[str]:
+        return [self.start_gateway(p) for p in self.gateways]
 
-    def stop_all(self):
+    def stop_all(self) -> None:
         for gw in self.gateways.values():
             gw.stop()
 
-    def get_status(self) -> Dict[str, bool]:
-        """Returns connection status for all registered gateways."""
-        return {name: gw.is_connected for name, gw in self.gateways.items()}
+    def get_status(self) -> Dict[str, Dict[str, object]]:
+        return {
+            name: {"configured": gw.configured, "connected": gw.is_connected, "inbound": gw.inbound,
+                   "token_env": gw.token_env, "note": gw.inbound_note}
+            for name, gw in self.gateways.items()
+        }

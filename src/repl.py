@@ -47,6 +47,7 @@ from .kernel.features import CANONICAL_FEATURES, FeatureRegistry
 from .kernel.state import SessionState
 from .modes.manager import PROFILES
 from .providers.router import MODEL_ALIASES
+from .paths import history_file as _history_file
 
 
 class OmniCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):
@@ -183,7 +184,7 @@ async def run_rich_repl(
         tool_registry=tool_registry,
         tracer=tracer,
     )
-    history_file = os.path.expanduser("~/.omni_history")
+    history_file = str(_history_file())
 
     # Initialize PromptSession with live auto-completion dropdown
     session = None

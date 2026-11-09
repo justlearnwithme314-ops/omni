@@ -15,6 +15,7 @@ import sys
 from typing import Any, Callable, Dict, List, Optional
 
 from .base import CanonicalTool, DiscoveryResult
+from ..paths import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ class OmniAdapter:
     """Discovers and registers custom, native Omni plugins from plugins/omni/."""
 
     def __init__(self, root_dir: Optional[Path] = None, config: Any = None, event_bus: Any = None):
-        self.root_dir = Path(root_dir or r"D:\Harness\omni").resolve()
+        self.root_dir = Path(root_dir or PROJECT_ROOT).resolve()
         self.config = config
         self.event_bus = event_bus
         self.tools: List[CanonicalTool] = []

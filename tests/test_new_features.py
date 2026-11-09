@@ -1,3 +1,6 @@
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import _isolation  # noqa: F401  (must come before any src import)
 from pathlib import Path
 """
 Verification Test Suite for the 7 Advanced Features:

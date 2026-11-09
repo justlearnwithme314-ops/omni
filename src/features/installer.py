@@ -8,11 +8,12 @@ import shutil
 import subprocess
 import sys
 from typing import Any, Dict, List, Optional, Tuple
+from ..paths import PROJECT_ROOT
 
 
 class SkillDependencyInstaller:
     def __init__(self, workspace_root: Optional[str] = None):
-        self.workspace_root = Path(workspace_root or r"D:\Harness\omni").resolve()
+        self.workspace_root = Path(workspace_root or PROJECT_ROOT).resolve()
 
     def detect_package_managers(self) -> Dict[str, Optional[str]]:
         return {

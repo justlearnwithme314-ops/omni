@@ -6,14 +6,18 @@ and data visualizations alongside code chat.
 """
 
 from dataclasses import dataclass, field
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hmac
+import html
 import json
 import logging
 import os
 import secrets
 import threading
+import urllib.parse
 import time
 from typing import Any, Dict, List, Optional
+from ..paths import user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +37,7 @@ class CanvasDocument:
             "kind": self.kind,
             "content": self.content,
             "created_at": self.created_at,
-            "url": f"http://localhost:18790/canvas/{self.id}",
+            
         }
 
 
@@ -94,35 +98,35 @@ CANVAS_VIEWER_HTML = """<!DOCTYPE html>
 
 
 class VisualCanvasManager:
-    def __init__(self, port: int = 18790, storage_dir: Optional[str] = None):
+    """Local visual canvas server.
+
+    Security model: loopback bind; creating documents over HTTP needs the bearer token;
+    titles and diagram source are HTML-escaped; agent-supplied HTML/SVG is served with a
+    ``Content-Security-Policy: sandbox allow-scripts`` header so it runs in an opaque origin
+    and cannot touch the canvas server's own origin.
+    """
+
+    KINDS = ("mermaid", "html_bundle", "svg", "markdown")
+
+    def __init__(self, port: int = 18790, storage_dir: Optional[str] = None, host: str = "127.0.0.1"):
         self.port = port
-        self.storage_dir = storage_dir or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".omni", "canvas"
-        )
+        self.host = host
+        self.token = secrets.token_urlsafe(16)
+        self.storage_dir = storage_dir or str(user_data_dir() / "canvas")
         os.makedirs(self.storage_dir, exist_ok=True)
         self.documents: Dict[str, CanvasDocument] = {}
-        self._server: Optional[HTTPServer] = None
+        self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self.is_running = False
-        self._load_documents()
 
-    def _load_documents(self):
-        # Create default sample architecture canvas
-        default_doc = CanvasDocument(
-            id="architecture_overview",
-            title="Omni Universal System Architecture",
-            kind="mermaid",
-            content="graph TD\n  Client[REPL / CLI / Gateways] --> Kernel[Omni Microkernel]\n  Kernel --> Adapters[5-Ecosystem Adapters]\n  Adapters --> Pi[Oh My Pi / Pi]\n  Adapters --> Claw[OpenClaw Skills]\n  Adapters --> Hermes[Hermes Plugins]\n  Adapters --> MCP[Model Context Protocol]\n  Adapters --> Native[Omni Native Plugins]",
-        )
-        self.documents[default_doc.id] = default_doc
+    def url_for(self, doc_id: str) -> str:
+        return f"http://{self.host}:{self.port}/canvas/{doc_id}"
 
     def create_document(self, title: str, content: str, kind: str = "mermaid") -> CanvasDocument:
-        """Creates and stores a visual document, returning entry URL."""
-        doc_id = f"doc_{secrets.token_hex(4)}"
-        doc = CanvasDocument(id=doc_id, title=title, content=content, kind=kind)
-        self.documents[doc_id] = doc
-
-        # Ensure server is running
+        if kind not in self.KINDS:
+            raise ValueError(f"kind must be one of {self.KINDS}")
+        doc = CanvasDocument(id=f"doc_{secrets.token_hex(4)}", title=title[:200], content=content, kind=kind)
+        self.documents[doc.id] = doc
         self.start()
         return doc
 
@@ -132,85 +136,82 @@ class VisualCanvasManager:
     def list_documents(self) -> List[CanvasDocument]:
         return list(self.documents.values())
 
-    def start(self):
-        """Starts local Canvas HTTP server on 0.0.0.0:port."""
+    def render(self, doc: CanvasDocument) -> bytes:
+        if doc.kind == "mermaid":
+            body = f'<pre class="mermaid">{html.escape(doc.content)}</pre>'
+        elif doc.kind in ("html_bundle", "svg"):
+            body = doc.content  # untrusted: neutralised by the CSP sandbox header
+        else:
+            body = f'<pre style="white-space:pre-wrap">{html.escape(doc.content)}</pre>'
+        page = (
+            CANVAS_VIEWER_HTML.replace("{{TITLE}}", html.escape(doc.title))
+            .replace("{{KIND}}", html.escape(doc.kind.upper()))
+            .replace("{{BODY}}", body)
+        )
+        return page.encode("utf-8")
+
+    def start(self) -> None:
         if self.is_running:
             return
-
         manager = self
 
-        class CanvasHTTPHandler(BaseHTTPRequestHandler):
+        class Handler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
-                pass  # Quiet logs
+                pass
+
+            def _send(self, code: int, body: bytes, ctype: str, extra: Optional[Dict[str, str]] = None) -> None:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("X-Content-Type-Options", "nosniff")
+                for k, v in (extra or {}).items():
+                    self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(body)
 
             def do_GET(self):
-                if self.path in ("/", "/canvas"):
-                    # Gallery view
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    docs = [d.to_dict() for d in manager.documents.values()]
-                    self.wfile.write(json.dumps({"documents": docs}).encode("utf-8"))
-                    return
-
-                if self.path.startswith("/canvas/"):
-                    doc_id = self.path.split("?")[0].replace("/canvas/", "")
-                    doc = manager.get_document(doc_id)
+                path = urllib.parse.urlparse(self.path).path
+                if path in ("/", "/canvas"):
+                    docs = [dict(d.to_dict(), url=manager.url_for(d.id)) for d in manager.documents.values()]
+                    for d in docs:
+                        d.pop("content", None)
+                    return self._send(200, json.dumps({"documents": docs}).encode(), "application/json")
+                if path.startswith("/canvas/"):
+                    doc = manager.get_document(path[len("/canvas/"):])
                     if doc:
-                        self.send_response(200)
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.end_headers()
-
-                        if doc.kind == "mermaid":
-                            body = f'<pre class="mermaid">\n{doc.content}\n</pre>'
-                        elif doc.kind in ("html_bundle", "svg"):
-                            body = doc.content
-                        else:
-                            body = f'<pre style="white-space: pre-wrap;">{doc.content}</pre>'
-
-                        html = CANVAS_VIEWER_HTML.replace("{{TITLE}}", doc.title).replace("{{KIND}}", doc.kind.upper()).replace("{{BODY}}", body)
-                        self.wfile.write(html.encode("utf-8"))
-                        return
-
-                self.send_response(404)
-                self.end_headers()
+                        return self._send(
+                            200, manager.render(doc), "text/html; charset=utf-8",
+                            {"Content-Security-Policy": "sandbox allow-scripts"},
+                        )
+                self._send(404, b'{"error":"not found"}', "application/json")
 
             def do_POST(self):
-                if self.path == "/canvas":
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = self.rfile.read(length).decode("utf-8")
-                    try:
-                        data = json.loads(body)
-                        doc = manager.create_document(
-                            title=data.get("title", "Untitled Canvas"),
-                            content=data.get("content", ""),
-                            kind=data.get("kind", "mermaid"),
-                        )
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps(doc.to_dict()).encode("utf-8"))
-                        return
-                    except Exception:
-                        pass
-                self.send_response(400)
-                self.end_headers()
+                if urllib.parse.urlparse(self.path).path != "/canvas":
+                    return self._send(404, b'{"error":"not found"}', "application/json")
+                supplied = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+                if not hmac.compare_digest(supplied, manager.token):
+                    return self._send(403, b'{"error":"forbidden"}', "application/json")
+                try:
+                    length = min(int(self.headers.get("Content-Length", 0)), 1_000_000)
+                    data = json.loads(self.rfile.read(length).decode("utf-8"))
+                    doc = manager.create_document(
+                        str(data.get("title", "Untitled")), str(data.get("content", "")), str(data.get("kind", "mermaid"))
+                    )
+                except Exception as e:
+                    return self._send(400, json.dumps({"error": str(e)}).encode(), "application/json")
+                self._send(200, json.dumps(dict(doc.to_dict(), url=manager.url_for(doc.id))).encode(), "application/json")
 
         try:
-            self._server = HTTPServer(("0.0.0.0", self.port), CanvasHTTPHandler)
-            self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-            self._thread.start()
-            self.is_running = True
-            logger.info(f"VisualCanvasManager listening on port {self.port}")
-        except Exception as e:
-            logger.warning(f"Failed to bind VisualCanvas on port {self.port}: {e}")
-            self.is_running = False
+            self._server = ThreadingHTTPServer((self.host, self.port), Handler)
+        except OSError as e:
+            raise RuntimeError(f"Canvas server cannot bind {self.host}:{self.port}: {e}") from e
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        self.is_running = True
 
-    def stop(self):
+    def stop(self) -> None:
         if self._server:
-            try:
-                self._server.shutdown()
-                self._server.server_close()
-            except Exception:
-                pass
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
         self.is_running = False

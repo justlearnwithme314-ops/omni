@@ -4,6 +4,9 @@ Tests profile filtering (pi, omp, hermes, openclaw, full), individual command to
 and real command handler executions.
 """
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import _isolation  # noqa: F401  (must come before any src import)
 import asyncio
 import os
 import sys

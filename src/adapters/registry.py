@@ -328,9 +328,15 @@ class MasterToolRegistry:
         
         # --- 4. Browser DevTools Protocol (CDP) Relay Tool ---
         async def browser_cdp_handler(args: dict, context: dict = None) -> str:
-            from ..features.browser_relay import ChromeDevToolsRelay
-            relay = ChromeDevToolsRelay()
+            from ..kernel.services import services
+            relay = services.browser
             action = args.get("action", "list_tabs")
+            try:
+                return await asyncio.to_thread(_browser_action, relay, action, args)
+            except Exception as e:  # BrowserNotConnected, CdpError, ...
+                return json.dumps({"error": str(e)})
+
+        def _browser_action(relay, action, args):
             if action == "list_tabs":
                 tabs = [t.__dict__ for t in relay.list_tabs()]
                 return json.dumps({"tabs": tabs})
@@ -364,8 +370,8 @@ class MasterToolRegistry:
 
         # --- 5. Language Server Protocol (LSP) Intelligence Tool ---
         async def lsp_query_handler(args: dict, context: dict = None) -> str:
-            from ..features.lsp_bridge import LspClient
-            client = LspClient()
+            from ..kernel.services import services
+            client = services.lsp
             op = args.get("operation", "diagnostics")
             target = args.get("file_path", "src/cli.py")
             res = client.execute_lsp_operation(op, target, query=args.get("query", ""), symbol=args.get("symbol", ""))
@@ -393,14 +399,17 @@ class MasterToolRegistry:
 
         # --- 6. Visual Canvas Renderer Tool ---
         async def canvas_render_handler(args: dict, context: dict = None) -> str:
-            from ..features.visual_canvas import VisualCanvasManager
-            vcm = VisualCanvasManager(port=18790)
-            doc = vcm.create_document(
-                title=args.get("title", "Visual Artifact"),
-                content=args.get("content", ""),
-                kind=args.get("kind", "mermaid"),
-            )
-            return json.dumps(doc.to_dict())
+            from ..kernel.services import services
+            vcm = services.canvas
+            try:
+                doc = vcm.create_document(
+                    title=args.get("title", "Visual Artifact"),
+                    content=args.get("content", ""),
+                    kind=args.get("kind", "mermaid"),
+                )
+            except Exception as e:
+                return json.dumps({"error": str(e)})
+            return json.dumps(dict(doc.to_dict(), url=vcm.url_for(doc.id)))
 
         self.register_tool(
             CanonicalTool(
@@ -423,8 +432,8 @@ class MasterToolRegistry:
 
         # --- 7. Companion Device Node Task Tool ---
         async def remote_node_task_handler(args: dict, context: dict = None) -> str:
-            from ..features.node_pairing import NodePairingManager
-            npm = NodePairingManager()
+            from ..kernel.services import services
+            npm = services.nodes
             node_id = args.get("node_id", "node_local_host")
             cap = args.get("capability", "system.run")
             res = npm.dispatch_remote_task(node_id, cap, args.get("params", {"command": "echo 'ok'"}))

@@ -12,6 +12,7 @@ import os
 import secrets
 import time
 from typing import Any, Dict, List, Optional
+from ..paths import user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +52,7 @@ class PairingRequest:
 
 class NodePairingManager:
     def __init__(self, storage_path: Optional[str] = None):
-        self.storage_path = storage_path or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".omni", "paired_nodes.json"
-        )
+        self.storage_path = storage_path or str(user_data_dir() / "paired_nodes.json")
         os.makedirs(os.path.dirname(self.storage_path), exist_ok=True)
         self.nodes: Dict[str, PairedNode] = {}
         self.pending_requests: Dict[str, PairingRequest] = {}
@@ -106,21 +105,18 @@ class NodePairingManager:
     def get_pairing_url(self, req: PairingRequest, host: str = "127.0.0.1", port: int = 18789) -> str:
         return f"omni://pair?id={req.request_id}&token={req.token}&gateway={host}:{port}"
 
-    def get_ascii_qr(self, pairing_url: str) -> str:
-        """Renders an ASCII QR representation for terminal display."""
-        return (
-            "  ██████████████  ██      ██████████████  \n"
-            "  ██          ██  ██  ██  ██          ██  \n"
-            "  ██  ██████  ██  ████    ██  ██████  ██  \n"
-            "  ██  ██████  ██    ██    ██  ██████  ██  \n"
-            "  ██  ██████  ██  ██████  ██  ██████  ██  \n"
-            "  ██          ██  ██  ██  ██          ██  \n"
-            "  ██████████████  ██  ██  ██████████████  \n"
-            "                  ████                    \n"
-            "  ██████████████    ████  ██████  ██  ██  \n"
-            "  ██          ██    ████  ██  ██    ██    \n"
-            "  ██████████████  ██  ██  ██████  ██████  \n"
-        )
+    def render_qr(self, pairing_url: str) -> str:
+        """Terminal QR for the pairing URL, or '' when the optional 'qrcode' package is missing."""
+        try:
+            import io
+            import qrcode  # optional: pip install qrcode
+        except ImportError:
+            return ""
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(pairing_url)
+        buf = io.StringIO()
+        qr.print_ascii(out=buf, invert=True)
+        return buf.getvalue()
 
     def approve_pairing(self, request_id: str, device_name: str, platform: str, ip: str = "127.0.0.1") -> Optional[PairedNode]:
         """Approves a pairing request and registers the new companion node."""
@@ -146,43 +142,19 @@ class NodePairingManager:
         return list(self.nodes.values())
 
     def dispatch_remote_task(self, node_id: str, capability: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Dispatches an action (e.g. screen.capture or system.run) to a paired node."""
+        """Remote execution is NOT implemented: pairing only records devices.
+
+        A live transport (a companion app connecting back to the gateway) is required before
+        tasks can run on another device. This returns an explicit error instead of fake data.
+        """
         node = self.nodes.get(node_id)
         if not node:
             return {"success": False, "error": f"Node '{node_id}' not found"}
-
         if capability not in node.capabilities:
-            return {"success": False, "error": f"Node '{node.name}' does not have capability '{capability}'"}
-
-        # Remote execution handler
-        if capability == "screen.capture":
-            return {
-                "success": True,
-                "node": node.name,
-                "capability": capability,
-                "format": "png_base64",
-                "width": 1170,
-                "height": 2532,
-                "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-            }
-        elif capability == "system.run":
-            cmd = params.get("command", "echo 'remote task executed'")
-            return {
-                "success": True,
-                "node": node.name,
-                "command": cmd,
-                "output": f"[Executed on {node.name}]: task completed successfully",
-                "exit_code": 0,
-            }
-        elif capability == "notification":
-            title = params.get("title", "Omni Notification")
-            msg = params.get("message", "Task finished")
-            return {
-                "success": True,
-                "node": node.name,
-                "status": "delivered",
-                "title": title,
-                "message": msg,
-            }
-
-        return {"success": False, "error": f"Unhandled capability: {capability}"}
+            return {"success": False, "error": f"Node '{node.name}' does not advertise '{capability}'"}
+        return {
+            "success": False,
+            "error": "not_implemented: no live transport to this node (companion app not connected)",
+            "node": node.name,
+            "capability": capability,
+        }

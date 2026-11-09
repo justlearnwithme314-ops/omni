@@ -6,6 +6,7 @@ Defines standard contracts for Telegram, Discord, Slack, and WhatsApp.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import logging
+import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -24,7 +25,22 @@ class InboundChatMessage:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+class GatewayNotConfigured(RuntimeError):
+    """The platform token environment variable is not set."""
+
+
 class BaseChatGateway(ABC):
+    token_env: str = ""      # environment variable holding the credential
+    inbound: bool = False    # can this client RECEIVE messages by itself (socket/polling)?
+    inbound_note: str = ""   # how inbound works when it cannot (e.g. webhook)
+
+    def token(self) -> str:
+        return os.environ.get(self.token_env, "") if self.token_env else ""
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.token())
+
     def __init__(self, platform_name: str, message_handler: Optional[Callable[[InboundChatMessage], str]] = None):
         self.platform_name = platform_name
         self.message_handler = message_handler

@@ -1,19 +1,33 @@
 """
-Shadow Git Worktree Isolation (session-worktree.ts & task/worktree.ts in Oh My Pi & Pi Core).
-Forks the current repository checkout into an isolated linked git worktree on an ephemeral branch,
-carrying uncommitted changes along so speculative refactorings can be tested without disturbing the main tree.
+Shadow git worktrees (Oh My Pi ``session-worktree`` / Pi isolation).
+
+Fork the current checkout into a linked git worktree on a throw-away branch, carry the
+uncommitted tracked changes along, run commands/tests there, and merge back only if the
+tests pass. Everything is a real ``git worktree``; if the directory is not a git repo the
+operations raise :class:`WorktreeError` (nothing is simulated).
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
 import os
 import secrets
+import shlex
 import shutil
 import subprocess
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from ..paths import user_data_dir
+from ..paths import workspace_root
 
 logger = logging.getLogger(__name__)
+
+Command = Union[str, Sequence[str]]
+
+
+class WorktreeError(RuntimeError):
+    pass
 
 
 @dataclass
@@ -23,124 +37,120 @@ class ShadowWorktree:
     branch: str
     base_commit: str
     created_at: float
-    status: str = "active"  # "active", "merged", "discarded"
+    status: str = "active"  # active | merged | discarded
+
+
+@dataclass
+class VerifyOutcome:
+    passed: bool
+    merged: bool
+    exit_code: int
+    output: str
+    message: str
+
+
+def _argv(command: Command) -> List[str]:
+    return shlex.split(command, posix=True) if isinstance(command, str) else list(command)
 
 
 class ShadowWorktreeManager:
-    def __init__(self, repo_dir: Optional[str] = None):
-        self.repo_dir = os.path.abspath(repo_dir or os.getcwd())
-        self.worktree_base = os.path.join(self.repo_dir, ".omni", "worktrees")
-        os.makedirs(self.worktree_base, exist_ok=True)
+    def __init__(self, repo_dir: Optional[str] = None, base_dir: Optional[str] = None):
+        self.repo_dir = os.path.abspath(repo_dir or workspace_root())
+        # Outside the repo so `git status` of the main checkout stays clean.
+        self.base_dir = base_dir or str(user_data_dir() / "worktrees")
+        os.makedirs(self.base_dir, exist_ok=True)
         self.active_worktrees: Dict[str, ShadowWorktree] = {}
 
-    def _is_git_repo(self) -> bool:
-        return os.path.exists(os.path.join(self.repo_dir, ".git"))
+    # ---- git helpers -------------------------------------------------------
+    def _git(self, args: List[str], cwd: Optional[str] = None, check: bool = True, input_bytes: Optional[bytes] = None):
+        proc = subprocess.run(["git", *args], cwd=cwd or self.repo_dir, capture_output=True, input=input_bytes)
+        if check and proc.returncode != 0:
+            raise WorktreeError(f"git {' '.join(args[:2])} failed: {proc.stderr.decode(errors='replace').strip()}")
+        return proc
 
-    def create_worktree(self, name_suffix: Optional[str] = None) -> Tuple[bool, str, Optional[ShadowWorktree]]:
-        """Creates an ephemeral linked git worktree on a speculative branch."""
-        if not self._is_git_repo():
-            # Simulated worktree mode for non-git environments
-            wt_id = f"wt_{secrets.token_hex(4)}"
-            simulated_path = os.path.join(self.worktree_base, wt_id)
-            os.makedirs(simulated_path, exist_ok=True)
-            wt = ShadowWorktree(
-                id=wt_id,
-                path=simulated_path,
-                branch=f"omni/speculative-{wt_id}",
-                base_commit="HEAD",
-                created_at=time.time(),
-            )
-            self.active_worktrees[wt.id] = wt
-            return True, f"[✓] Created simulated shadow worktree at {simulated_path}", wt
+    def _require_repo(self) -> None:
+        if not shutil.which("git"):
+            raise WorktreeError("git is not installed")
+        probe = self._git(["rev-parse", "--is-inside-work-tree"], check=False)
+        if probe.returncode != 0:
+            raise WorktreeError(f"{self.repo_dir} is not a git repository")
 
+    # ---- lifecycle ---------------------------------------------------------
+    def create_worktree(self, name_suffix: Optional[str] = None) -> Tuple[bool, str, ShadowWorktree]:
+        self._require_repo()
         wt_id = f"wt_{name_suffix or secrets.token_hex(4)}"
-        branch = f"omni/speculative-{wt_id}"
-        target_path = os.path.join(self.worktree_base, wt_id)
+        branch = f"omni/{wt_id}"
+        path = os.path.join(self.base_dir, f"{os.path.basename(self.repo_dir)}-{wt_id}")
+        base = self._git(["rev-parse", "HEAD"]).stdout.decode().strip()
+        self._git(["worktree", "add", "-b", branch, path, "HEAD"])
 
-        # Get current HEAD commit
-        rev = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self.repo_dir,
-            capture_output=True,
-            text=True,
-        )
-        base_commit = rev.stdout.strip() or "HEAD"
+        carried = ""
+        patch = self._git(["diff", "HEAD", "--binary"]).stdout
+        if patch.strip():
+            applied = self._git(["apply", "--whitespace=nowarn", "-"], cwd=path, check=False, input_bytes=patch)
+            carried = " (uncommitted tracked changes carried over)" if applied.returncode == 0 else \
+                f" (WARNING: could not carry uncommitted changes: {applied.stderr.decode(errors='replace').strip()})"
 
-        # Create git worktree
-        cmd = ["git", "worktree", "add", "-b", branch, target_path, "HEAD"]
-        res = subprocess.run(cmd, cwd=self.repo_dir, capture_output=True, text=True)
+        wt = ShadowWorktree(id=wt_id, path=path, branch=branch, base_commit=base, created_at=time.time())
+        self.active_worktrees[wt_id] = wt
+        return True, f"Created worktree '{wt_id}' on branch '{branch}' at {path}{carried}", wt
 
-        if res.returncode != 0:
-            logger.warning(f"git worktree add failed ({res.stderr.strip()}); using isolated workspace directory")
-            os.makedirs(target_path, exist_ok=True)
-
-        wt = ShadowWorktree(
-            id=wt_id,
-            path=target_path,
-            branch=branch,
-            base_commit=base_commit,
-            created_at=time.time(),
-        )
-        self.active_worktrees[wt.id] = wt
-        return True, f"[✓] Created shadow git worktree '{wt_id}' on branch '{branch}' at {target_path}", wt
-
-    def execute_in_worktree(self, worktree_id: str, command: str) -> Tuple[int, str, str]:
-        """Runs a test suite or build command inside the isolated worktree directory."""
+    def _get(self, worktree_id: str) -> ShadowWorktree:
         wt = self.active_worktrees.get(worktree_id)
         if not wt:
-            return 1, "", f"Worktree '{worktree_id}' not found"
+            raise WorktreeError(f"Worktree '{worktree_id}' not found")
+        return wt
 
-        res = subprocess.run(
-            command,
-            shell=True,
-            cwd=wt.path,
-            capture_output=True,
-            text=True,
-        )
-        return res.returncode, res.stdout or "", res.stderr or ""
+    def execute_in_worktree(self, worktree_id: str, command: Command, timeout: int = 300) -> Tuple[int, str, str]:
+        wt = self._get(worktree_id)
+        try:
+            proc = subprocess.run(_argv(command), cwd=wt.path, capture_output=True, text=True, timeout=timeout)
+            return proc.returncode, proc.stdout or "", proc.stderr or ""
+        except subprocess.TimeoutExpired:
+            return 124, "", f"timed out after {timeout}s"
+        except FileNotFoundError as e:
+            return 127, "", str(e)
+
+    def commit_worktree(self, worktree_id: str, message: str = "omni: shadow worktree changes") -> bool:
+        wt = self._get(worktree_id)
+        self._git(["add", "-A"], cwd=wt.path)
+        if not self._git(["status", "--porcelain"], cwd=wt.path).stdout.strip():
+            return False
+        self._git(["-c", "user.name=omni", "-c", "user.email=omni@localhost", "commit", "-m", message], cwd=wt.path)
+        return True
 
     def merge_worktree(self, worktree_id: str) -> Tuple[bool, str]:
-        """Merges successful speculative worktree changes back into main branch."""
-        wt = self.active_worktrees.get(worktree_id)
-        if not wt:
-            return False, f"Worktree '{worktree_id}' not found"
-
-        if self._is_git_repo():
-            # Merge branch
-            merge_res = subprocess.run(
-                ["git", "merge", "--no-ff", wt.branch, "-m", f"Merge speculative branch {wt.branch}"],
-                cwd=self.repo_dir,
-                capture_output=True,
-                text=True,
-            )
-            self.discard_worktree(worktree_id)
-            if merge_res.returncode == 0:
-                return True, f"[✓] Successfully merged shadow worktree '{worktree_id}' into main."
-            return False, f"[!] Merge conflict: {merge_res.stderr.strip()}"
-
+        """Fast-forward the main checkout to the worktree branch (never creates conflicts silently)."""
+        wt = self._get(worktree_id)
+        self.commit_worktree(worktree_id)
+        merged = self._git(["merge", "--ff-only", wt.branch], check=False)
+        if merged.returncode != 0:
+            return False, ("Fast-forward merge refused (main moved or has conflicting local changes): "
+                           + merged.stderr.decode(errors="replace").strip())
+        wt.status = "merged"
         self.discard_worktree(worktree_id)
-        return True, f"[✓] Completed simulated merge of worktree '{worktree_id}'."
+        return True, f"Merged '{wt.branch}' into the current branch"
 
     def discard_worktree(self, worktree_id: str) -> Tuple[bool, str]:
-        """Prunes and removes an isolated worktree on failure or cancellation."""
-        wt = self.active_worktrees.pop(worktree_id, None)
-        if not wt:
-            return False, f"Worktree '{worktree_id}' not found"
+        wt = self._get(worktree_id)
+        self._git(["worktree", "remove", "--force", wt.path], check=False)
+        self._git(["branch", "-D", wt.branch], check=False)
+        shutil.rmtree(wt.path, ignore_errors=True)
+        del self.active_worktrees[worktree_id]
+        return True, f"Removed worktree '{worktree_id}'"
 
-        if self._is_git_repo():
-            subprocess.run(["git", "worktree", "remove", "--force", wt.path], cwd=self.repo_dir, capture_output=True)
-            subprocess.run(["git", "branch", "-D", wt.branch], cwd=self.repo_dir, capture_output=True)
-
-        if os.path.exists(wt.path):
-            try:
-                shutil.rmtree(wt.path, ignore_errors=True)
-            except Exception:
-                pass
-
-        return True, f"[✓] Discarded and removed shadow worktree '{worktree_id}'."
+    def verify_and_merge(self, worktree_id: str, test_command: Command) -> VerifyOutcome:
+        """Run tests in the worktree; merge if they pass, discard if they fail."""
+        code, out, err = self.execute_in_worktree(worktree_id, test_command)
+        output = (out + err).strip()
+        if code != 0:
+            self.discard_worktree(worktree_id)
+            return VerifyOutcome(False, False, code, output, "Tests failed: worktree discarded, main untouched")
+        ok, msg = self.merge_worktree(worktree_id)
+        return VerifyOutcome(True, ok, code, output, msg)
 
     def list_worktrees(self) -> List[Dict[str, Any]]:
         return [
-            {"id": wt.id, "branch": wt.branch, "path": wt.path, "status": wt.status}
-            for wt in self.active_worktrees.values()
+            {"id": w.id, "branch": w.branch, "path": w.path, "status": w.status}
+            for w in self.active_worktrees.values()
         ]

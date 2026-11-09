@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import time
 from typing import Dict, List, Optional
+from ..paths import workspace_root as _workspace_root
 
 
 @dataclass
@@ -23,7 +24,7 @@ class MentalModelRepository:
     """Manages persistent project mental model rule cards."""
 
     def __init__(self, workspace_root: Optional[str] = None):
-        self.workspace_root = Path(workspace_root or r"D:\Harness\omni").resolve()
+        self.workspace_root = Path(workspace_root or _workspace_root()).resolve()
         self.models_dir = self.workspace_root / ".omni" / "mental_models"
         self._init_repo()
 

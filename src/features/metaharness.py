@@ -11,6 +11,7 @@ import os
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from ..paths import user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +34,7 @@ class EvaluationRun:
 
 class MetaHarnessManager:
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".omni", "benchmarks.sqlite"
-        )
+        self.db_path = db_path or str(user_data_dir() / "benchmarks.sqlite")
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
@@ -130,31 +129,13 @@ class MetaHarnessManager:
                 (run_id, step, event_type, tool_name, json.dumps(payload), time.time()),
             )
 
-    def execute_mock_trial(self, exp_id: str, task_id: str, model: str = "google/gemini-2.5-flash") -> EvaluationRun:
-        """Simulates and scores a benchmark task execution trial."""
-        t0 = time.perf_counter()
-        run_id = f"run_{task_id}_{os.urandom(3).hex()}"
-
-        # Record start trace
-        self.record_trace_step(run_id, 1, "task_start", None, {"task_id": task_id, "model": model})
-        self.record_trace_step(run_id, 2, "tool_execution", "ast_grep", {"pattern": "def solve(): ..."})
-
-        duration = round(time.perf_counter() - t0, 3)
-        run = EvaluationRun(
-            id=run_id,
-            experiment_id=exp_id,
-            task_id=task_id,
-            model=model,
-            status="resolved",
-            score=1.0,
-            tokens_in=1250,
-            tokens_out=340,
-            cost_usd=0.00042,
-            duration_s=duration,
-            patch_diff="--- a/solution.py\n+++ b/solution.py\n@@ -1,2 +1,2 @@\n-def solve(): pass\n+def solve(): return 42\n",
-        )
-        self.record_run(run)
-        return run
+    def list_experiments(self) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            rows = conn.execute(
+                "SELECT e.id, e.name, e.benchmark_type, COUNT(r.id) FROM experiments e "
+                "LEFT JOIN runs r ON r.experiment_id = e.id GROUP BY e.id ORDER BY e.created_at DESC"
+            ).fetchall()
+        return [{"id": i, "name": n, "benchmark": b, "runs": c} for i, n, b, c in rows]
 
     def get_experiment_summary(self, exp_id: str) -> Dict[str, Any]:
         """Aggregate scores, total token spend, and resolution rates."""

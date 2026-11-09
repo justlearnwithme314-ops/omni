@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 from typing import Optional, Tuple
+from ..paths import workspace_root as _workspace_root
 
 
 class ExecutionSandbox:
@@ -17,7 +18,7 @@ class ExecutionSandbox:
         cpu_limit: str = "1.0",
         prefer_docker: bool = False,
     ):
-        self.workspace_dir = Path(workspace_dir or r"D:\Harness\omni").resolve()
+        self.workspace_dir = Path(workspace_dir or _workspace_root()).resolve()
         self.image = image
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit

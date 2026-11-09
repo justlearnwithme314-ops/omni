@@ -106,3 +106,23 @@ python -m unittest tests.test_harness tests.test_features_deep tests.test_new_fe
 
 ## License
 MIT License.
+
+## Configuration & environment
+
+Omni locates everything relative to its own install directory or your current project, never a fixed drive path.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `OMNI_CONFIG` | settings file | `<install>/harness.config.json` |
+| `OMNI_WORKSPACE` | project being worked on (checkpoints, AST search, worktrees) | current directory |
+| `OMNI_HOME` | per-user state (benchmarks, paired nodes, browser profile, worktrees) | `~/.omni` |
+| `OMNI_HISTORY` | prompt history for ghost suggestions | `~/.omni_history` |
+| `OMNI_AUTH_DB` | credentials database | `<install>/agent_auth.db` |
+| `OMNI_TELEGRAM_TOKEN`, `OMNI_DISCORD_TOKEN`, `OMNI_SLACK_TOKEN`, `OMNI_WHATSAPP_TOKEN` | chat gateway credentials | unset |
+
+The test suite (`python -m unittest discover tests`) points all of these at a scratch directory (`tests/_isolation.py`).
+
+### What is real and what is not yet implemented
+
+* Working: browser relay (real CDP; Chrome/Edge/Brave), shadow git worktrees, Docker sandbox (refuses to run without Docker), collab and canvas servers (loopback + key/token), Telegram polling, local llama.cpp client, text-to-speech.
+* Not implemented yet: speech input/wake word, Discord/Slack/WhatsApp inbound sockets, remote execution on paired nodes, benchmark runner, Firefox automation (WebDriver BiDi).

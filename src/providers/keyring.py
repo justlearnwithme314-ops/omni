@@ -12,13 +12,17 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from ..paths import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = os.environ.get(
-    "OMNI_AUTH_DB",
-    r"D:\Harness\omni-harness\agent_auth.db",
-)
+def _default_db_path() -> str:
+    if os.environ.get("OMNI_AUTH_DB"):
+        return os.environ["OMNI_AUTH_DB"]
+    return str(PROJECT_ROOT / "agent_auth.db")
+
+
+DEFAULT_DB_PATH = _default_db_path()
 
 DEFAULT_ENDPOINTS = [
     ("openai", "https://api.openai.com/v1", "gpt-4o"),

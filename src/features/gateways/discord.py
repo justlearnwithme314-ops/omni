@@ -4,6 +4,7 @@ Handles Discord Gateway connection, slash commands, channel mentions, and messag
 """
 
 import json
+import os
 import logging
 import threading
 import time
@@ -11,21 +12,27 @@ from typing import Callable, Optional
 import urllib.request
 import urllib.error
 
-from .base import BaseChatGateway, InboundChatMessage
+from .base import BaseChatGateway, GatewayNotConfigured, InboundChatMessage
 
 logger = logging.getLogger(__name__)
 
 
 class DiscordChatGateway(BaseChatGateway):
+    token_env = "OMNI_DISCORD_TOKEN"
+    inbound = False
+    inbound_note = "outbound REST only; the Discord gateway websocket is not implemented"
+
     def __init__(self, bot_token: Optional[str] = None, message_handler: Optional[Callable[[InboundChatMessage], str]] = None):
         super().__init__("discord", message_handler)
-        self.bot_token = bot_token or "MOCK_DISCORD_BOT_TOKEN"
+        self.bot_token = bot_token or os.environ.get(self.token_env, "")
         self._thread: Optional[threading.Thread] = None
 
     def start(self):
         """Starts Discord gateway worker."""
         if self._running:
             return
+        if not self.bot_token:
+            raise GatewayNotConfigured(f"Set {self.token_env} (bot token from the Discord developer portal)")
         self._running = True
         self.is_connected = True
         self._thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -38,9 +45,8 @@ class DiscordChatGateway(BaseChatGateway):
 
     def send_message(self, channel_id: str, content: str) -> bool:
         """Sends message to Discord channel via REST API."""
-        if self.bot_token == "MOCK_DISCORD_BOT_TOKEN":
-            logger.info(f"[Mock Discord -> Channel {channel_id}]: {content[:80]}")
-            return True
+        if not self.bot_token:
+            return False
 
         url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
         payload = json.dumps({"content": content}).encode("utf-8")

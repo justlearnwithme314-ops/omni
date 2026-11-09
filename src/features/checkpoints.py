@@ -5,11 +5,12 @@ Git Checkpointing & Instant /undo Engine (OpenClaw & Aider Architecture Standout
 from pathlib import Path
 import subprocess
 from typing import List, Optional, Tuple
+from ..paths import workspace_root as _workspace_root
 
 
 class GitCheckpointManager:
     def __init__(self, workspace_root: Optional[str] = None):
-        self.workspace_root = Path(workspace_root or r"D:\Harness\omni").resolve()
+        self.workspace_root = Path(workspace_root or _workspace_root()).resolve()
         self.checkpoints: List[str] = []
         self._ensure_git()
 

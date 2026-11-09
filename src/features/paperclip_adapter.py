@@ -11,6 +11,7 @@ import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
+from ..paths import user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +40,7 @@ class EmployeeProfile:
 
 class PaperclipAdapter:
     def __init__(self, config_file: Optional[str] = None):
-        self.config_file = config_file or os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".omni", "paperclip_employee.json"
-        )
+        self.config_file = config_file or str(user_data_dir() / "paperclip_employee.json")
         os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
         self.profile = EmployeeProfile()
         self.tickets: Dict[str, PaperclipTicket] = {}

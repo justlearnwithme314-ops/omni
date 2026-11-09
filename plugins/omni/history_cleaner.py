@@ -6,6 +6,7 @@ Provides tools and interactive commands to clear user prompt input history and m
 import os
 from pathlib import Path
 from src.adapters.omni import omni_tool
+from src.paths import history_file
 
 
 @omni_tool(
@@ -24,7 +25,7 @@ from src.adapters.omni import omni_tool
 )
 def clear_input_history(keep_last: int = 0) -> str:
     """Clears ~/.omni_history and resets prompt suggestions."""
-    hist_path = Path.home() / ".omni_history"
+    hist_path = history_file()
     if not hist_path.exists():
         return "[i] Input history is already empty (no ~/.omni_history file found)."
 

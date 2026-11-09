@@ -1,19 +1,26 @@
 """
-Ephemeral Docker Sandbox Runner (openclaw sandbox in OpenClaw).
-Executes untrusted commands and third-party skills inside disposable Docker
-containers with strict resource constraints (--memory=512m, --cpus=1.0, read-only root).
-Provides automated fallback to LocalProcessSandbox when Docker daemon is unavailable.
+Ephemeral Docker sandbox (OpenClaw ``sandbox``).
+
+Runs a command in a disposable container with resource limits. **Fails closed**: when
+Docker is unavailable the command is *refused* instead of silently running on the host.
+Host execution is possible only when the caller passes ``allow_host=True`` (the
+``/sandbox --host`` flag), and the result always says whether isolation was applied.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Sequence, Union
 
 logger = logging.getLogger(__name__)
+
+Command = Union[str, Sequence[str]]
 
 
 @dataclass
@@ -21,8 +28,8 @@ class SandboxConfig:
     memory_limit: str = "512m"
     cpu_limit: str = "1.0"
     timeout_sec: int = 30
-    network_mode: str = "bridge"  # "none", "bridge", "host"
-    read_only_root: bool = False
+    network_mode: str = "none"  # safest default; pass "bridge" to allow network
+    read_only_root: bool = True
     image: str = "python:3.12-slim"
 
 
@@ -33,98 +40,80 @@ class SandboxExecutionResult:
     exit_code: int
     duration_s: float
     isolated_in_docker: bool
+    refused: bool = False
+
+
+def _argv(command: Command) -> List[str]:
+    if isinstance(command, str):
+        return shlex.split(command, posix=True)
+    return list(command)
 
 
 class DockerSandboxRunner:
+    REFUSED_CODE = 126
+
     def __init__(self, config: Optional[SandboxConfig] = None):
         self.config = config or SandboxConfig()
-        self.container_id: Optional[str] = None
-        self._docker_available = self._check_docker_daemon()
+        self._docker_available: Optional[bool] = None
 
-    def _check_docker_daemon(self) -> bool:
-        """Verifies if docker CLI and daemon are responding."""
+    def is_docker_active(self, refresh: bool = False) -> bool:
+        if self._docker_available is None or refresh:
+            self._docker_available = self._probe_docker()
+        return self._docker_available
+
+    @staticmethod
+    def _probe_docker() -> bool:
         if not shutil.which("docker"):
             return False
         try:
-            res = subprocess.run(["docker", "info"], capture_output=True, text=True, timeout=2.0)
-            return res.returncode == 0
+            return subprocess.run(["docker", "info"], capture_output=True, timeout=5).returncode == 0
         except Exception:
             return False
 
-    def is_docker_active(self) -> bool:
-        return self._docker_available
+    def docker_command(self, argv: List[str], cwd: Optional[str] = None) -> List[str]:
+        cfg = self.config
+        cmd = [
+            "docker", "run", "--rm",
+            f"--memory={cfg.memory_limit}", f"--cpus={cfg.cpu_limit}",
+            f"--network={cfg.network_mode}", "--pids-limit=256", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+        ]
+        if cfg.read_only_root:
+            cmd += ["--read-only", "--tmpfs", "/tmp:rw,size=64m"]
+        if cwd:
+            cmd += ["-v", f"{os.path.abspath(cwd)}:/workspace:ro", "-w", "/workspace"]
+        return cmd + [cfg.image] + argv
 
-    def run(self, command: str, cwd: Optional[str] = None) -> SandboxExecutionResult:
-        """Executes command in disposable Docker container or falls back to local sandbox."""
-        t0 = time.perf_counter()
+    def run(self, command: Command, cwd: Optional[str] = None, allow_host: bool = False) -> SandboxExecutionResult:
+        started = time.perf_counter()
+        argv = _argv(command)
+        if not argv:
+            return SandboxExecutionResult("", "empty command", 2, 0.0, False, refused=True)
 
-        if self._docker_available:
-            try:
-                docker_cmd = [
-                    "docker", "run", "--rm",
-                    f"--memory={self.config.memory_limit}",
-                    f"--cpus={self.config.cpu_limit}",
-                    f"--network={self.config.network_mode}",
-                ]
-                if self.config.read_only_root:
-                    docker_cmd.extend(["--read-only", "--tmpfs", "/tmp:rw,size=64m"])
+        if self.is_docker_active():
+            return self._exec(self.docker_command(argv, cwd), None, started, isolated=True)
 
-                if cwd:
-                    host_cwd = os.path.abspath(cwd)
-                    docker_cmd.extend(["-v", f"{host_cwd}:/workspace", "-w", "/workspace"])
-
-                docker_cmd.extend([self.config.image, "sh", "-c", command])
-
-                proc = subprocess.run(
-                    docker_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=self.config.timeout_sec,
-                )
-                dur = round(time.perf_counter() - t0, 3)
-                return SandboxExecutionResult(
-                    stdout=proc.stdout or "",
-                    stderr=proc.stderr or "",
-                    exit_code=proc.returncode,
-                    duration_s=dur,
-                    isolated_in_docker=True,
-                )
-            except Exception as e:
-                logger.warning(f"Docker execution failed, falling back to local runner: {e}")
-
-        # Local process fallback
-        try:
-            proc = subprocess.run(
-                command,
-                shell=True,
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=self.config.timeout_sec,
-            )
-            dur = round(time.perf_counter() - t0, 3)
+        if not allow_host:
             return SandboxExecutionResult(
-                stdout=proc.stdout or "",
-                stderr=proc.stderr or "",
-                exit_code=proc.returncode,
-                duration_s=dur,
-                isolated_in_docker=False,
+                "",
+                "Docker is not available, so the command was NOT run. Install/start Docker Desktop, "
+                "or re-run with explicit host execution (/sandbox --host <cmd>) if you trust the command.",
+                self.REFUSED_CODE, round(time.perf_counter() - started, 3), False, refused=True,
+            )
+        logger.warning("Sandbox: running %r on the HOST without isolation (allow_host=True)", argv)
+        return self._exec(argv, cwd, started, isolated=False)
+
+    def _exec(self, argv: List[str], cwd: Optional[str], started: float, isolated: bool) -> SandboxExecutionResult:
+        try:
+            proc = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=self.config.timeout_sec)
+            return SandboxExecutionResult(
+                proc.stdout or "", proc.stderr or "", proc.returncode,
+                round(time.perf_counter() - started, 3), isolated,
             )
         except subprocess.TimeoutExpired:
-            dur = round(time.perf_counter() - t0, 3)
             return SandboxExecutionResult(
-                stdout="",
-                stderr=f"Execution timed out after {self.config.timeout_sec}s",
-                exit_code=124,
-                duration_s=dur,
-                isolated_in_docker=False,
+                "", f"Timed out after {self.config.timeout_sec}s", 124,
+                round(time.perf_counter() - started, 3), isolated,
             )
-        except Exception as e:
-            dur = round(time.perf_counter() - t0, 3)
-            return SandboxExecutionResult(
-                stdout="",
-                stderr=str(e),
-                exit_code=1,
-                duration_s=dur,
-                isolated_in_docker=False,
-            )
+        except FileNotFoundError as e:
+            return SandboxExecutionResult("", str(e), 127, round(time.perf_counter() - started, 3), isolated)

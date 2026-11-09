@@ -4,6 +4,7 @@ Provides Socket Mode / Webhook adapter for Slack and Baileys / Cloud bridge for 
 """
 
 import json
+import os
 import logging
 import threading
 import time
@@ -11,29 +12,33 @@ from typing import Callable, Optional
 import urllib.request
 import urllib.error
 
-from .base import BaseChatGateway, InboundChatMessage
+from .base import BaseChatGateway, GatewayNotConfigured, InboundChatMessage
 
 logger = logging.getLogger(__name__)
 
 
 class SlackChatGateway(BaseChatGateway):
+    token_env = "OMNI_SLACK_TOKEN"
+    inbound = False
+    inbound_note = "outbound only; feed Slack Events API payloads to handle_raw_event via the webhook receiver"
+
     def __init__(self, bot_token: Optional[str] = None, message_handler: Optional[Callable[[InboundChatMessage], str]] = None):
         super().__init__("slack", message_handler)
-        self.bot_token = bot_token or "MOCK_SLACK_BOT_TOKEN"
+        self.bot_token = bot_token or os.environ.get(self.token_env, "")
 
     def start(self):
+        if not self.bot_token:
+            raise GatewayNotConfigured(f"Set {self.token_env} (xoxb- bot token)")
         self._running = True
-        self.is_connected = True
-        logger.info("SlackChatGateway Socket Mode connected")
+        self.is_connected = True  # means: able to send
 
     def stop(self):
         self._running = False
         self.is_connected = False
 
     def send_message(self, channel_id: str, content: str) -> bool:
-        if self.bot_token == "MOCK_SLACK_BOT_TOKEN":
-            logger.info(f"[Mock Slack -> Channel {channel_id}]: {content[:80]}")
-            return True
+        if not self.bot_token:
+            return False
 
         url = "https://slack.com/api/chat.postMessage"
         payload = json.dumps({"channel": channel_id, "text": content}).encode("utf-8")
@@ -72,25 +77,28 @@ class SlackChatGateway(BaseChatGateway):
 
 
 class WhatsAppChatGateway(BaseChatGateway):
+    token_env = "OMNI_WHATSAPP_TOKEN"
+    inbound = False
+    inbound_note = "outbound via Cloud API; inbound arrives as webhooks -> handle_raw_payload (no Baileys/QR client)"
+
     def __init__(self, token: Optional[str] = None, phone_number_id: Optional[str] = None, message_handler: Optional[Callable[[InboundChatMessage], str]] = None):
         super().__init__("whatsapp", message_handler)
-        self.token = token or "MOCK_WHATSAPP_TOKEN"
-        self.phone_number_id = phone_number_id or "MOCK_PHONE_ID"
-        self.pairing_qr = "QR_CODE_PAIRING_STRING_READY"
+        self.token_value = token or os.environ.get(self.token_env, "")
+        self.phone_number_id = phone_number_id or os.environ.get("OMNI_WHATSAPP_PHONE_ID", "")
 
     def start(self):
+        if not self.token_value or not self.phone_number_id:
+            raise GatewayNotConfigured(f"Set {self.token_env} and OMNI_WHATSAPP_PHONE_ID (WhatsApp Cloud API)")
         self._running = True
-        self.is_connected = True
-        logger.info("WhatsAppChatGateway bridge connected")
+        self.is_connected = True  # means: able to send
 
     def stop(self):
         self._running = False
         self.is_connected = False
 
     def send_message(self, channel_id: str, content: str) -> bool:
-        if self.token == "MOCK_WHATSAPP_TOKEN":
-            logger.info(f"[Mock WhatsApp -> Recipient {channel_id}]: {content[:80]}")
-            return True
+        if not self.token_value or not self.phone_number_id:
+            return False
 
         url = f"https://graph.facebook.com/v18.0/{self.phone_number_id}/messages"
         payload = json.dumps({
@@ -100,7 +108,7 @@ class WhatsAppChatGateway(BaseChatGateway):
             "text": {"body": content},
         }).encode("utf-8")
         headers = {
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Bearer {self.token_value}",
             "Content-Type": "application/json",
         }
         try:

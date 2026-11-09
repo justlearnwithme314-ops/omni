@@ -19,11 +19,15 @@ execution modes, and model tiers.
 
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
-DEFAULT_CONFIG_PATH = Path(r"D:\Harness\omni-harness\harness.config.json")
-FALLBACK_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "harness.config.json"
+# Config always lives in THIS project's own root (never another checkout).
+# Override with the OMNI_CONFIG environment variable (used by the test suite).
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "harness.config.json"
+FALLBACK_CONFIG_PATH = DEFAULT_CONFIG_PATH
 
 DEFAULT_FEATURES: Dict[str, bool] = {
     "plugins_pi": True,
@@ -80,12 +84,11 @@ class HarnessConfig:
         config_path: Optional[Union[str, Path]] = None,
         auto_load: bool = True,
     ) -> None:
+        env_path = os.environ.get("OMNI_CONFIG")
         if config_path is not None:
             self.config_path = Path(config_path)
-        elif DEFAULT_CONFIG_PATH.exists():
-            self.config_path = DEFAULT_CONFIG_PATH
-        elif FALLBACK_CONFIG_PATH.exists():
-            self.config_path = FALLBACK_CONFIG_PATH
+        elif env_path:
+            self.config_path = Path(env_path)
         else:
             self.config_path = DEFAULT_CONFIG_PATH
 

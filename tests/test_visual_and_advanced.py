@@ -4,6 +4,9 @@ Tests Themes & Skins, Split-Pane Dual View, Spinners & Counters, Petdex Mascots,
 TTSR, AST-Grep, Mental Models, Audio Notifier, MoA, and Egress Firewall.
 """
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+import _isolation  # noqa: F401  (must come before any src import)
 import asyncio
 import os
 import shutil
@@ -90,7 +93,8 @@ class TestVisualAndAdvancedFeatures(unittest.TestCase):
 
     def test_06_ast_grep_structural_search(self):
         """Verify AST-Grep structural Python syntax search."""
-        searcher = ASTGrepSearcher()
+        from src.paths import PROJECT_ROOT  # search Omni's own sources, explicitly
+        searcher = ASTGrepSearcher(workspace_root=str(PROJECT_ROOT))
         funcs = searcher.search_functions("complete")
         self.assertTrue(len(funcs) >= 1)
         self.assertIn("complete", funcs[0]["name"])

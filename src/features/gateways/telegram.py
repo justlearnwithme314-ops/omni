@@ -4,6 +4,7 @@ Supports long-polling and webhook ingestion for 2-way AI chat on Telegram.
 """
 
 import json
+import os
 import logging
 import threading
 import time
@@ -11,15 +12,18 @@ from typing import Callable, Optional
 import urllib.request
 import urllib.error
 
-from .base import BaseChatGateway, InboundChatMessage
+from .base import BaseChatGateway, GatewayNotConfigured, InboundChatMessage
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramChatGateway(BaseChatGateway):
+    token_env = "OMNI_TELEGRAM_TOKEN"
+    inbound = True
+
     def __init__(self, bot_token: Optional[str] = None, message_handler: Optional[Callable[[InboundChatMessage], str]] = None):
         super().__init__("telegram", message_handler)
-        self.bot_token = bot_token or "MOCK_TELEGRAM_BOT_TOKEN"
+        self.bot_token = bot_token or os.environ.get(self.token_env, "")
         self._thread: Optional[threading.Thread] = None
         self._last_update_id = 0
 
@@ -27,6 +31,8 @@ class TelegramChatGateway(BaseChatGateway):
         """Starts background long-polling loop."""
         if self._running:
             return
+        if not self.bot_token:
+            raise GatewayNotConfigured(f"Set {self.token_env} (token from @BotFather)")
         self._running = True
         self.is_connected = True
         self._thread = threading.Thread(target=self._polling_loop, daemon=True)
@@ -39,9 +45,8 @@ class TelegramChatGateway(BaseChatGateway):
 
     def send_message(self, channel_id: str, content: str) -> bool:
         """Send message back to Telegram chat."""
-        if self.bot_token == "MOCK_TELEGRAM_BOT_TOKEN":
-            logger.info(f"[Mock Telegram -> Chat {channel_id}]: {content[:80]}")
-            return True
+        if not self.bot_token:
+            return False
 
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         payload = json.dumps({"chat_id": channel_id, "text": content, "parse_mode": "Markdown"}).encode("utf-8")
@@ -77,10 +82,6 @@ class TelegramChatGateway(BaseChatGateway):
 
     def _polling_loop(self):
         while self._running:
-            if self.bot_token == "MOCK_TELEGRAM_BOT_TOKEN":
-                time.sleep(1.0)
-                continue
-
             try:
                 url = f"https://api.telegram.org/bot{self.bot_token}/getUpdates?offset={self._last_update_id + 1}&timeout=10"
                 req = urllib.request.Request(url)

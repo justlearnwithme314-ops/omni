@@ -8,13 +8,14 @@ import ast
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from ..paths import workspace_root as _workspace_root
 
 
 class ASTGrepSearcher:
     """Structural Python AST code pattern searcher."""
 
     def __init__(self, workspace_root: Optional[str] = None):
-        self.workspace_root = Path(workspace_root or r"D:\Harness\omni").resolve()
+        self.workspace_root = Path(workspace_root or _workspace_root()).resolve()
 
     def search_functions(self, name_pattern: str = "", path: Optional[str] = None) -> List[Dict[str, Any]]:
         """Finds function and async function definitions matching name or docstring."""

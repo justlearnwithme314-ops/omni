@@ -129,15 +129,19 @@ async def async_run(args, config: HarnessConfig):
     user_prompt = " ".join(prompt_val) if prompt_val else None
     if not user_prompt:
         from .repl import run_rich_repl
-        await run_rich_repl(
-            engine=engine,
-            config=config,
-            router=router,
-            tool_registry=tool_registry,
-            tracer=tracer,
-            initial_model=active_model,
-            initial_mode=profile.name,
-        )
+        from .kernel.services import services
+        try:
+            await run_rich_repl(
+                engine=engine,
+                config=config,
+                router=router,
+                tool_registry=tool_registry,
+                tracer=tracer,
+                initial_model=active_model,
+                initial_mode=profile.name,
+            )
+        finally:
+            services.shutdown()  # stop collab/canvas servers, gateways, any browser we launched
     else:
         print(f"\n[prompt] > {user_prompt}")
         session_state = await engine.run_session(user_prompt, model=active_model)

@@ -6,13 +6,15 @@ Teammates can watch the agent's live terminal diffs, tool calls, and plan execut
 
 import asyncio
 from dataclasses import dataclass, field
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 import os
+import hmac
 import secrets
 import socket
 import threading
+import urllib.parse
 import time
 from typing import Any, Dict, List, Optional, Set
 
@@ -37,6 +39,7 @@ class CollabRoom:
     active: bool = True
     events: List[CollabEvent] = field(default_factory=list)
     clients: Set[str] = field(default_factory=set)
+    pending_prompts: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -221,123 +224,139 @@ COLLAB_SPA_HTML = """<!DOCTYPE html>
 
 
 class CollabServerManager:
-    def __init__(self, port: int = 18791):
+    """Embedded collaboration server.
+
+    Security model: binds to loopback by default; every API call must present the
+    room key (constant-time compared); "view" rooms are strictly read-only.
+    """
+
+    def __init__(self, port: int = 18791, host: str = "127.0.0.1"):
         self.port = port
+        self.host = host
         self.rooms: Dict[str, CollabRoom] = {}
-        self._server: Optional[HTTPServer] = None
+        self._server: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self.is_running = False
 
+    # ---- room API ---------------------------------------------------------
     def create_room(self, title: str = "Omni Live Pairing", mode: str = "pair") -> CollabRoom:
-        """Create a new collaboration room with secure auth key."""
-        room_id = secrets.token_hex(6)
-        auth_key = secrets.token_urlsafe(16)
-        room = CollabRoom(id=room_id, key=auth_key, title=title, mode=mode)
-        self.rooms[room_id] = room
-
-        # Ensure server is running
+        if mode not in ("pair", "view"):
+            raise ValueError("mode must be 'pair' or 'view'")
+        room = CollabRoom(id=secrets.token_hex(6), key=secrets.token_urlsafe(16), title=title, mode=mode)
+        self.rooms[room.id] = room
         self.start()
         return room
 
     def get_room(self, room_id: str) -> Optional[CollabRoom]:
         return self.rooms.get(room_id)
 
+    def close_room(self, room_id: str) -> bool:
+        room = self.rooms.pop(room_id, None)
+        if room:
+            room.active = False
+        return room is not None
+
     def broadcast_event(self, room_id: str, event_type: str, data: Dict[str, Any]) -> bool:
-        """Broadcast an event to all room participants."""
         room = self.rooms.get(room_id)
         if not room or not room.active:
             return False
-        ev = CollabEvent(
-            id=secrets.token_hex(4),
-            type=event_type,
-            timestamp=time.time(),
-            data=data,
-        )
-        room.events.append(ev)
+        room.events.append(CollabEvent(id=secrets.token_hex(4), type=event_type, timestamp=time.time(), data=data))
+        del room.events[:-500]  # bound memory
         return True
+
+    def pop_guest_prompts(self, room_id: str) -> List[str]:
+        """Prompts typed by guests since the last call (the agent loop should drain this)."""
+        room = self.rooms.get(room_id)
+        if not room:
+            return []
+        out, room.pending_prompts = room.pending_prompts, []
+        return out
 
     def get_share_url(self, room_id: str) -> str:
         room = self.rooms.get(room_id)
         if not room:
-            return f"http://localhost:{self.port}"
-        return f"http://localhost:{self.port}/#room={room.id}&key={room.key}"
+            return f"http://127.0.0.1:{self.port}"
+        return f"http://127.0.0.1:{self.port}/#room={room.id}&key={room.key}"
 
-    def start(self):
-        """Start the embedded HTTP collaboration server in a background thread."""
+    # ---- server -----------------------------------------------------------
+    def _authorized(self, room: CollabRoom, supplied: Optional[str]) -> bool:
+        return bool(supplied) and hmac.compare_digest(str(supplied), room.key)
+
+    def start(self) -> None:
         if self.is_running:
             return
-
         manager = self
 
-        class CollabHTTPHandler(BaseHTTPRequestHandler):
-            def log_message(self, format, *args):
-                pass  # Quiet logging
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):  # quiet
+                pass
+
+            def _json(self, code: int, payload: Dict[str, Any]) -> None:
+                body = json.dumps(payload).encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
 
             def do_GET(self):
-                if self.path in ("/", "/index.html"):
+                parsed = urllib.parse.urlparse(self.path)
+                if parsed.path in ("/", "/index.html"):
+                    body = COLLAB_SPA_HTML.encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(body)))
                     self.end_headers()
-                    self.wfile.write(COLLAB_SPA_HTML.encode("utf-8"))
+                    self.wfile.write(body)
                     return
-
-                if self.path.startswith("/api/room/"):
-                    parts = self.path.split("?")[0].split("/")
-                    if len(parts) >= 4:
-                        r_id = parts[3]
-                        rm = manager.rooms.get(r_id)
-                        if rm:
-                            self.send_response(200)
-                            self.send_header("Content-Type", "application/json")
-                            self.end_headers()
-                            data = rm.to_dict()
-                            data["events"] = [
-                                {"id": e.id, "type": e.type, "timestamp": e.timestamp, "data": e.data}
-                                for e in rm.events[-50:]
-                            ]
-                            self.wfile.write(json.dumps(data).encode("utf-8"))
-                            return
-
-                self.send_response(404)
-                self.end_headers()
+                parts = parsed.path.strip("/").split("/")
+                if len(parts) == 3 and parts[:2] == ["api", "room"]:
+                    room = manager.rooms.get(parts[2])
+                    key = urllib.parse.parse_qs(parsed.query).get("key", [None])[0]
+                    if not room or not manager._authorized(room, key):
+                        return self._json(403, {"error": "forbidden"})
+                    data = room.to_dict()
+                    data["events"] = [
+                        {"id": e.id, "type": e.type, "timestamp": e.timestamp, "data": e.data}
+                        for e in room.events[-50:]
+                    ]
+                    return self._json(200, data)
+                self._json(404, {"error": "not found"})
 
             def do_POST(self):
-                if "/api/room/" in self.path and "/prompt" in self.path:
-                    length = int(self.headers.get("Content-Length", 0))
-                    body = self.rfile.read(length).decode("utf-8")
-                    try:
-                        req_data = json.loads(body)
-                        prompt = req_data.get("prompt", "")
-                        parts = self.path.split("/")
-                        r_id = parts[3]
-                        manager.broadcast_event(r_id, "guest_prompt", {"text": prompt, "author": "guest"})
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/json")
-                        self.end_headers()
-                        self.wfile.write(json.dumps({"status": "received", "prompt": prompt}).encode("utf-8"))
-                        return
-                    except Exception:
-                        pass
-
-                self.send_response(400)
-                self.end_headers()
+                parts = urllib.parse.urlparse(self.path).path.strip("/").split("/")
+                if not (len(parts) == 4 and parts[:2] == ["api", "room"] and parts[3] == "prompt"):
+                    return self._json(404, {"error": "not found"})
+                try:
+                    length = min(int(self.headers.get("Content-Length", 0)), 16384)
+                    req = json.loads(self.rfile.read(length).decode("utf-8"))
+                except Exception:
+                    return self._json(400, {"error": "bad request"})
+                room = manager.rooms.get(parts[2])
+                if not room or not manager._authorized(room, req.get("key")):
+                    return self._json(403, {"error": "forbidden"})
+                if room.mode != "pair":
+                    return self._json(403, {"error": "this room is view-only"})
+                prompt = str(req.get("prompt", "")).strip()[:4000]
+                if not prompt:
+                    return self._json(400, {"error": "empty prompt"})
+                room.pending_prompts.append(prompt)
+                manager.broadcast_event(room.id, "guest_prompt", {"text": prompt, "author": "guest"})
+                self._json(200, {"status": "queued"})
 
         try:
-            self._server = HTTPServer(("0.0.0.0", self.port), CollabHTTPHandler)
-            self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
-            self._thread.start()
-            self.is_running = True
-            logger.info(f"CollabServerManager listening on port {self.port}")
-        except Exception as e:
-            logger.warning(f"Failed to bind CollabServer on port {self.port}: {e}")
-            self.is_running = False
+            self._server = ThreadingHTTPServer((self.host, self.port), Handler)
+        except OSError as e:
+            raise RuntimeError(f"Collab server cannot bind {self.host}:{self.port}: {e}") from e
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+        self.is_running = True
+        logger.info("Collab server listening on %s:%s", self.host, self.port)
 
-    def stop(self):
-        """Stop collaboration server."""
+    def stop(self) -> None:
         if self._server:
-            try:
-                self._server.shutdown()
-                self._server.server_close()
-            except Exception:
-                pass
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
         self.is_running = False
