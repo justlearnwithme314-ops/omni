@@ -57,7 +57,8 @@ class LiveStreamingSpinner:
             elapsed = time.time() - self.start_time
             frame = SPINNER_FRAMES[idx % len(SPINNER_FRAMES)]
             rate_str = f" | {self.token_count / elapsed:.1f} tok/s" if elapsed > 0.5 and self.token_count > 0 else ""
-            line = f"\r\033[93m{frame}\033[0m {self.message} [\033[90m{elapsed:.1f}s{rate_str}\033[0m]"
+            # Clean formatting without raw leaky ANSI escape sequences on Windows cmd.exe
+            line = f"\r{frame} {self.message} ({elapsed:.1f}s{rate_str})   "
             sys.stdout.write(line)
             sys.stdout.flush()
             idx += 1
