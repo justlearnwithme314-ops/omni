@@ -33,15 +33,32 @@ class ChromeDevToolsRelay:
         self.base_url = f"http://{host}:{port}"
         self.active_tab_id: Optional[str] = None
         self._console_logs: List[str] = []
+        self.browser_type = "chrome"
 
     def is_connected(self) -> bool:
-        """Check if Chrome remote debugging port is open and reachable."""
+        """Check if Chrome (CDP) or Firefox (WebDriver BiDi) remote debugging port is reachable."""
+        # 1. Check Chrome / Chromium CDP endpoint
         try:
             req = urllib.request.Request(f"{self.base_url}/json/version", headers={"User-Agent": "OmniBrowserRelay/1.0"})
             with urllib.request.urlopen(req, timeout=1.5) as resp:
-                return resp.status == 200
+                if resp.status == 200:
+                    self.browser_type = "chrome"
+                    return True
         except Exception:
-            return False
+            pass
+
+        # 2. Check Firefox WebDriver BiDi endpoint
+        try:
+            req = urllib.request.Request(f"{self.base_url}/", headers={"User-Agent": "OmniBrowserRelay/1.0"})
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                text = resp.read().decode("utf-8", errors="ignore")
+                if "httpd.js" in text:
+                    self.browser_type = "firefox"
+                    return True
+        except Exception:
+            pass
+
+        return False
 
     def list_tabs(self) -> List[BrowserTab]:
         """Fetch all currently open browser tabs from Chrome CDP."""
