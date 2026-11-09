@@ -284,10 +284,17 @@ class MasterToolRegistry:
         if is_enabled_fn is None and isinstance(feature_registry, dict):
             is_enabled_fn = lambda k: feature_registry.get(k, True)
 
-        openclaw_active = is_enabled_fn("openclaw_skills") if is_enabled_fn else True
-        hermes_active = is_enabled_fn("hermes_plugins") if is_enabled_fn else True
-        pi_active = is_enabled_fn("pi_extensions") if is_enabled_fn else True
-        mcp_active = is_enabled_fn("mcp_servers") if is_enabled_fn else True
+        def check_feat(canonical, alias):
+            if is_enabled_fn:
+                v1 = is_enabled_fn(canonical)
+                v2 = is_enabled_fn(alias)
+                return bool(v1 or v2)
+            return True
+
+        openclaw_active = check_feat("openclaw_skills", "plugins_openclaw")
+        hermes_active = check_feat("hermes_plugins", "plugins_hermes")
+        pi_active = check_feat("pi_extensions", "plugins_pi")
+        mcp_active = check_feat("mcp_servers", "plugins_mcp")
 
         enabled_counts = {}
         for tool in self._tools.values():

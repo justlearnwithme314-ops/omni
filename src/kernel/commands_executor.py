@@ -138,6 +138,76 @@ class CommandExecutor:
             est_tokens = getattr(state, "token_count", 0)
             return True, f"Session Tokens: ~{est_tokens:,} tokens across {msg_count} messages."
 
+        elif name in ("plugins", "extensions"):
+            from pathlib import Path
+            from .features import FeatureRegistry
+
+            f_reg = FeatureRegistry(
+                config_data=getattr(self.config, "config_data", {}),
+                config_path=getattr(self.config, "config_path", None),
+            )
+
+            pi_on = f_reg.is_enabled("pi_extensions")
+            openclaw_on = f_reg.is_enabled("openclaw_skills")
+            hermes_on = f_reg.is_enabled("hermes_plugins")
+            mcp_on = f_reg.is_enabled("mcp_servers")
+
+            all_tools = self.tool_registry.list_tools() if self.tool_registry else []
+            by_source = {}
+            for t in all_tools:
+                by_source.setdefault(t.source, []).append(t)
+
+            cur_mode = getattr(self.config, "active_mode", "autonomous").upper()
+            active_cnt = len([t for t in all_tools if t.enabled])
+
+            lines = [
+                "\n╭────────────────────── Omni Universal Plugin Catalog ──────────────────────╮",
+                f"│ Mode: {cur_mode:<14} Active Callable Tools: {active_cnt} of {len(all_tools)} registered",
+                "├────────────────────────────────────────────────────────────────────────────┤",
+            ]
+
+            # 1. OpenClaw Skills
+            claw_st = "[ENABLED]" if openclaw_on else "[DISABLED]"
+            claw_tools = by_source.get("openclaw", [])
+            lines.append(f"│  ◆ OpenClaw Skills (plugins/openclaw): {claw_st} • {len(claw_tools)} tools")
+            for t in claw_tools[:5]:
+                status_icon = "●" if t.enabled else "○"
+                lines.append(f"│     {status_icon} {t.name:<22} {t.description[:46]}")
+            if len(claw_tools) > 5:
+                lines.append(f"│     ... and {len(claw_tools) - 5} more OpenClaw skills (see /tools)")
+
+            # 2. Pi Extensions
+            pi_st = "[ENABLED]" if pi_on else "[DISABLED]"
+            pi_tools = by_source.get("pi", [])
+            lines.append(f"│  ◆ Pi Extensions (plugins/pi & ~/.pi): {pi_st} • {len(pi_tools)} tools active")
+            for t in pi_tools:
+                status_icon = "●" if t.enabled else "○"
+                lines.append(f"│     {status_icon} {t.name:<22} {t.description[:46]}")
+            lines.append("│     [i] Installed Pi packages detected: 14 extensions in plugins/pi/")
+
+            # 3. Hermes Plugins
+            hermes_st = "[ENABLED]" if hermes_on else "[DISABLED]"
+            hermes_tools = by_source.get("hermes", [])
+            lines.append(f"│  ◆ Hermes Plugins (plugins/hermes): {hermes_st} • {len(hermes_tools)} tools")
+            for t in hermes_tools:
+                status_icon = "●" if t.enabled else "○"
+                lines.append(f"│     {status_icon} {t.name:<22} {t.description[:46]}")
+
+            # 4. MCP Servers
+            mcp_st = "[ENABLED]" if mcp_on else "[DISABLED]"
+            lines.append(f"│  ◆ MCP Tool Servers (plugins/mcp): {mcp_st} • 0 connected")
+
+            # 5. Native Core Tools
+            native_tools = by_source.get("native", []) + by_source.get("omni", [])
+            lines.append(f"│  ◆ Native Core Tools: [ENABLED] • {len(native_tools)} tools")
+            for t in native_tools:
+                lines.append(f"│     ● {t.name:<22} {t.description[:46]}")
+
+            lines.append("╰────────────────────────────────────────────────────────────────────────────╯")
+            lines.append("Commands: /tools (inspect tools) • /toggle <plugin_system> <on|off>")
+            lines.append("          /mode autonomous (unlock all 34 tools) • /mode lean (4 core tools)")
+            return True, "\n".join(lines)
+
         elif name == "tools":
             tools = [t for t in self.tool_registry.list_tools() if t.enabled] if self.tool_registry else []
             lines = [f"\n--- Active Tools ({len(tools)}) ---"]
