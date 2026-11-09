@@ -226,16 +226,10 @@ async def run_rich_repl(
         think = session_state.scratchpad.get("thinking_budget", "high")
         t = tm.get_theme()
 
-        from prompt_toolkit.formatted_text import FormattedText
-        return FormattedText([
-            (f"bold {t.primary}", f" {m_display} "),
-            ("#555555", "│ "),
-            (f"{t.success}", f"{pct}% / {max_tok} "),
-            ("#555555", "│ "),
-            (f"{t.secondary}", f"{cwd_disp} "),
-            ("", "                     "),
-            (f"{t.warning}", f"thinking: {think} "),
-        ])
+        from .ui import fit_bar, short_path, term_width
+        left = [(f"bold {t.primary}", f" {m_display} "), ("#555555", "│ "), (f"{t.success}", f"{pct}% / {max_tok} "),
+                ("#555555", "│ "), (f"{t.secondary}", f"{short_path(cwd_disp, max(8, term_width() // 3))} ")]
+        return fit_bar(left, [(f"{t.warning}", f"thinking: {think} ")])
 
     session_state = SessionState()
 
@@ -247,17 +241,10 @@ async def run_rich_repl(
 
             # OMP-style 2-line HUD prompt with active theme colors (using safe FormattedText)
             from prompt_toolkit.formatted_text import FormattedText
-            prompt_fragments = FormattedText([
-                (f"bold {t.secondary}", "╭─ "),
-                (f"bold {t.primary}", f"[{model_short}] "),
-                ("#555555", "• "),
-                (f"bold {t.success}", f"{active_mode.upper()} "),
-                ("#555555", "• "),
-                (f"{t.text}", f"{tool_count} tools "),
-                ("#555555", "• "),
-                (f"italic {t.accent}", f"{t.name}\n"),
-                (f"bold {t.primary}", "╰─❯ "),
-            ])
+            from rich.console import Console as _C
+            from .ui import header_rule
+            header_rule(_C(safe_box=False), f"[{t.primary}]{model_short}[/] • [{t.success}]{active_mode.upper()}[/] • {tool_count} tools • [{t.accent}]{t.name}[/]", t.secondary)
+            prompt_fragments = FormattedText([(f"bold {t.primary}", "❯ ")])
 
             dynamic_style = Style.from_dict({
                 "completion-menu": f"bg:#1f2026 {t.text}",
@@ -269,7 +256,7 @@ async def run_rich_repl(
                 "bottom-toolbar": f"{t.text} bg:#18181b",
             })
 
-            fallback_prompt_str = f"╭─ [{model_short}] ({t.name})\n╰─❯ "
+            fallback_prompt_str = "❯ "
 
             if session:
                 line = await session.prompt_async(prompt_fragments, bottom_toolbar=get_bottom_toolbar, style=dynamic_style)
