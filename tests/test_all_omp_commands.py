@@ -104,7 +104,7 @@ class TestAllOmpCommands(unittest.TestCase):
                 ("/cron", "Autonomous Cron Scheduler"),
                 ("/status", "Omni System Status"),
                 ("/webhooks", "Omni Webhook Endpoints"),
-                ("/snapshot test_snapshot", "saved to SQLite"),
+                ("/snapshot test_snapshot", "created in sqlite"),
                 ("/rollback 0", "rolled back"),
             ]
 
