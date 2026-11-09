@@ -91,6 +91,48 @@ class CommandExecutor:
                 return True, f"[✓] Switched command profile to: {arg.upper()} ({COMMAND_PROFILES[arg.lower()]['description']})"
             return True, f"[!] Unknown profile '{arg}'. Available: {list(COMMAND_PROFILES.keys())}"
 
+
+        elif name in ("model", "m"):
+            if not arg:
+                from rich.console import Console
+                from rich.panel import Panel
+                from rich.table import Table
+                from rich import box
+                from ..features.themes import ThemeManager
+
+                tm = ThemeManager()
+                theme = tm.get_theme()
+                c = Console(safe_box=False)
+
+                table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+                table.add_column(style="bold bright_cyan", width=30)
+                table.add_column()
+
+                table.add_row("→ model", "<provider/model> – Select model (opens selector UI)")
+                table.add_row("  scoped-models", "Enable/disable models for Ctrl+P cycling")
+                table.add_row("  subagents-models", "[u:npm:pi-subagents] Show model mappings for discovered subagent")
+                table.add_row("  antigravity.models", "[u:git:github.com/Rahularya01/pi-antigravity] List Antigravity models")
+                table.add_row("  skill:security-threat-model", "[u:npm:@vigolium/piolium] Repository-grounded threat modeling")
+                table.add_row("  (1/6)", "[dim]Page 1 of 6 • Tab or Up/Down arrows to navigate[/dim]")
+
+                panel = Panel(
+                    table,
+                    title=f"[bold {theme.primary}]/model (Interactive Selector Menu)[/bold {theme.primary}]",
+                    border_style=theme.panel_border,
+                    box=box.ROUNDED,
+                    padding=(1, 2)
+                )
+                c.print()
+                c.print(panel)
+                c.print()
+                active_m = getattr(state, "model", None) or getattr(self.config, "default_model", None) or "google-antigravity/gemini-3.8-flash"
+                think = state.scratchpad.get("thinking_budget", "high")
+                return True, f"Active Model: {active_m} (thinking: {think})\nAliases: flash, flash-3.8, sonnet, opus, pro, gpt-4o, mini, deepseek, haiku, argon\nUsage: /model <name_or_alias>"
+
+            if context and "switch_model" in context:
+                context["switch_model"](arg)
+            return True, f"[✓] Switched active model to: {arg}"
+
         elif name == "tokens":
             msg_count = len(state.messages)
             est_tokens = getattr(state, "token_count", 0)

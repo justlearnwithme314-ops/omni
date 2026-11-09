@@ -22,7 +22,7 @@ from .evolution.optimizer import EvolutionOptimizer
 
 
 def render_omni_dashboard(config=None, model="google-antigravity/gemini-2.5-flash", profile="AUTONOMOUS", tools_count=34):
-    """Renders a sleek, modern dashboard panel inspired by Claude Code and OMP."""
+    """Renders the solid blue block logo and sleek Pi/OMP dashboard."""
     try:
         from rich.console import Console, Group
         from rich.panel import Panel
@@ -34,6 +34,18 @@ def render_omni_dashboard(config=None, model="google-antigravity/gemini-2.5-flas
         tm = ThemeManager()
         active_theme = tm.get_theme()
         console = Console(safe_box=False)
+
+        # Solid Block Logo (matching user Pi 'agent' banner)
+        logo_text = (
+            "\n"
+            " ██████╗ ███╗   ███╗███╗   ██╗██╗\n"
+            "██╔═══██╗████╗ ████║████╗  ██║██║\n"
+            "██║   ██║██╔████╔██║██╔██╗ ██║██║\n"
+            "██║   ██║██║╚██╔╝██║██║╚██╗██║██║\n"
+            "╚██████╔╝██║ ╚═╝ ██║██║ ╚████║██║\n"
+            " ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝\n"
+        )
+        console.print(Text(logo_text, style="bold #00bfff"))
 
         title_text = Text()
         title_text.append(" ◆ ", style=f"bold {active_theme.primary}")
@@ -67,7 +79,6 @@ def render_omni_dashboard(config=None, model="google-antigravity/gemini-2.5-flas
             padding=(1, 2)
         )
 
-        console.print()
         console.print(panel)
         console.print()
     except Exception:

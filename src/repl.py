@@ -200,17 +200,35 @@ async def run_rich_repl(
             session = None
 
     def get_bottom_toolbar():
+        from pathlib import Path
+        clean_m = active_model.split("/")[-1]
+        if "gemini-3.8" in clean_m:
+            m_display = "gemini flash (antigravity) 3.8"
+        elif "gemini-2.5" in clean_m:
+            m_display = "gemini flash (antigravity) 2.5"
+        elif "claude-sonnet" in clean_m:
+            m_display = "claude sonnet (antigravity) 5.5"
+        else:
+            m_display = clean_m
+
+        cur_tok = getattr(session_state, "token_count", 0)
+        max_tok = "1M"
+        pct = min(100, int((cur_tok / 1_000_000) * 100)) if cur_tok else 0
+
+        try:
+            cwd_parts = Path.cwd().parts
+            cwd_disp = f"{cwd_parts[-2]}/{cwd_parts[-1]}" if len(cwd_parts) >= 2 else Path.cwd().name
+        except Exception:
+            cwd_disp = "Users/Admin"
+
+        think = session_state.scratchpad.get("thinking_budget", "high")
         t = tm.get_theme()
-        tool_count = len(tool_registry.list_tools()) if tool_registry else 0
-        keys_count = len(router.keyring.get_active_unblocked_keys("google-antigravity")) + len(router.keyring.get_active_unblocked_keys("anthropic"))
-        model_short = active_model.split("/")[-1]
+
         return HTML(
-            f" <b>Model:</b> <style color='{t.primary}'>{model_short}</style> │ "
-            f"<b>Mode:</b> <style color='{t.success}'>{active_mode.upper()}</style> │ "
-            f"<b>Skin:</b> <style color='{t.accent}'>{t.name}</style> │ "
-            f"<b>Tools:</b> {tool_count} │ "
-            f"<b>Keys:</b> {keys_count} active │ "
-            f"<i>Type /help for commands</i> "
+            f" <style color='#00bfff' bold>{m_display}</style> │ "
+            f"<style color='#9ece6a'>{pct}% / {max_tok}</style> │ "
+            f"<style color='#bb9af7'>{cwd_disp}</style>                      "
+            f"<style color='#e0af68'>thinking: {think}</style> "
         )
 
     session_state = SessionState()
