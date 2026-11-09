@@ -30,29 +30,41 @@ async function getOrLoadExtension(filePath) {
   const tools = new Map();
   const commands = new Map();
 
-  const pi = {
-    registerTool(toolDef) {
-      if (toolDef && toolDef.name) {
-        tools.set(toolDef.name, toolDef);
-      }
+  const handlers = new Map();
+  const noop = () => undefined;
+  const base = {
+    registerTool(toolDef) { if (toolDef && toolDef.name) tools.set(toolDef.name, toolDef); },
+    registerCommand(name, opts) { commands.set(name, opts); },
+    on(event, handler) { if (!handlers.has(event)) handlers.set(event, []); handlers.get(event).push(handler); },
+    off(event, handler) { handlers.set(event, (handlers.get(event) || []).filter((h) => h !== handler)); },
+    emit(event, data) { return fire(event, data); },
+    getActiveTools: () => [...tools.keys()],
+    getAllTools: () => [...tools.values()].map((t) => ({ name: t.name, description: t.description })),
+    getCommands: () => [...commands.keys()],
+    getFlag: noop,
+    exec: async (cmd, args = []) => {
+      const { spawnSync } = require("child_process");
+      const r = spawnSync(cmd, args, { encoding: "utf8", shell: true });
+      return { stdout: r.stdout || "", stderr: r.stderr || "", code: r.status ?? 1 };
     },
-    registerCommand(name, handler) {
-      commands.set(name, handler);
-    },
-    registerProvider(p) {},
-    registerFlag(f) {},
-    on(event, handler) {},
-    emit(event, data) {},
-    off(event, handler) {},
     events: { emit() {}, on() {}, off() {} },
     logger: {
-      info(...args) { process.stderr.write("[pi:info] " + args.join(" ") + "\n"); },
-      warn(...args) { process.stderr.write("[pi:warn] " + args.join(" ") + "\n"); },
-      error(...args) { process.stderr.write("[pi:error] " + args.join(" ") + "\n"); },
-      debug(...args) {},
+      info(...a) { process.stderr.write("[pi:info] " + a.join(" ") + "\n"); },
+      warn(...a) { process.stderr.write("[pi:warn] " + a.join(" ") + "\n"); },
+      error(...a) { process.stderr.write("[pi:error] " + a.join(" ") + "\n"); },
+      debug() {},
     },
     config: {},
   };
+  // Any API method we do not implement (registerShortcut, registerMessageRenderer, sendMessage, ...) is a safe no-op.
+  const pi = new Proxy(base, { get: (t, k) => (k in t ? t[k] : (typeof k === "string" ? noop : undefined)) });
+  const uiStub = new Proxy({}, { get: () => async () => undefined });
+  const ctx = { ui: uiStub, hasUI: false, cwd: process.cwd(), sessionManager: new Proxy({}, { get: () => () => [] }) };
+  async function fire(event, data) {
+    for (const h of handlers.get(event) || []) {
+      try { await h(data || { type: event }, ctx); } catch (e) { process.stderr.write("[pi:handler " + event + "] " + e + "\n"); }
+    }
+  }
 
   let mod;
   try {
@@ -66,8 +78,9 @@ async function getOrLoadExtension(filePath) {
   if (typeof initFn === "function") {
     await Promise.resolve(initFn(pi));
   }
+  await fire("session_start", { type: "session_start" });
 
-  const extData = { tools, commands, pi };
+  const extData = { tools, commands, pi, ctx };
   loadedExtensions.set(absPath, extData);
   return extData;
 }
@@ -111,13 +124,14 @@ rl.on("line", async (line) => {
       }
       let res;
       if (typeof tool.execute === "function") {
-        res = await Promise.resolve(tool.execute(args || {}));
+        res = await Promise.resolve(tool.execute("call_" + Date.now(), args || {}, undefined, undefined, extData.ctx));
       } else if (typeof tool.handler === "function") {
         res = await Promise.resolve(tool.handler(args || {}));
       } else {
         throw new Error("Tool " + tool_name + " has no execute or handler method");
       }
-      const output = typeof res === "string" ? res : JSON.stringify(res);
+      const output = typeof res === "string" ? res
+        : (res && Array.isArray(res.content)) ? res.content.map((c) => c.text || "").join("\n") : JSON.stringify(res);
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result: output }) + "\n");
     } else {
       process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } }) + "\n");

@@ -167,7 +167,7 @@ class NodeProcessManager:
 
         runner_js = os.path.join(os.path.dirname(__file__), "pi_runner.js")
         self._proc = subprocess.Popen(
-            [node_bin, "--experimental-strip-types", runner_js],
+            [node_bin, "--experimental-transform-types", "--no-warnings", "--import", os.path.join(os.path.dirname(__file__), "pi_register.mjs"), runner_js],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
