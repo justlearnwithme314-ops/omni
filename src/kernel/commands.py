@@ -54,6 +54,78 @@ COMMAND_PROFILES: Dict[str, Dict[str, Any]] = {
 # All 56 OMP Top-Level CLI Subcommands (omp <command>)
 # ---------------------------------------------------------------------------
 CLI_SUBCOMMANDS: Dict[str, str] = {
+    "whoami": "Show your sender id, permission tier, and role",
+    "openclaw": "Run the OpenClaw setup and repair assistant",
+    "allowlist": "List, add, or remove security allowlist entries",
+    "approve": "Review, approve, or deny pending tool execution requests",
+    "export-session": "Export current session to an HTML file",
+    "export-trajectory": "Export a JSONL trajectory bundle",
+    "tts": "Control text-to-speech voice synthesis",
+    "steer": "Send live guidance to the active run",
+    "followup": "Queue a followup turn",
+    "think": "Set thinking level (xhigh, max, adaptive, off)",
+    "verbose": "Toggle verbose execution logging mode",
+    "trace": "Toggle plugin trace lines",
+    "elevated": "Toggle elevated execution permissions",
+    "subagents": "Inspect active and completed subagent runs",
+    "pair": "Generate companion pairing setup code or QR code",
+    "completion": "Generate shell completion script",
+    "skills": "List and inspect available skills",
+    "secrets": "Secrets runtime controls",
+    "security": "Audit local config and state for common security foot-guns",
+    "directory": "Lookup contact and group IDs (self, peers, groups) for supported chat channels",
+    "channels": "Manage connected chat channels and accounts",
+    "plugins": "Manage OpenClaw plugins and extensions",
+    "pairing": "Secure DM pairing (approve inbound requests)",
+    "qr": "Generate a mobile pairing QR code and setup code",
+    "hooks": "Manage internal agent hooks",
+    "proxy": "Run the OpenClaw debug proxy and inspect captured traffic",
+    "qa": "Run QA scenarios and launch the private QA debugger UI",
+    "docs": "Search the live OpenClaw docs",
+    "dns": "DNS helpers for wide-area discovery (Tailscale + CoreDNS)",
+    "automations": "Manage automations (alias for cron)",
+    "chat": "Open a local terminal UI (alias for tui --local)",
+    "terminal": "Open a local terminal UI (alias for tui --local)",
+    "resume": "Resume a recent Gateway session in the TUI",
+    "tui": "Open a terminal UI connected to the Gateway",
+    "attach": "Attach Claude Code to a gateway session with scoped MCP tools",
+    "worktrees": "Create, inspect, restore, and clean up managed worktrees",
+    "sandbox": "Manage sandbox containers (Docker-based agent isolation)",
+    "worker": "Run the restricted cloud worker runtime",
+    "connect": "Connect this machine to an OpenClaw Gateway as a companion node",
+    "node": "Run and manage the headless node host service",
+    "users": "Manage durable user profiles and email aliases",
+    "devices": "Device pairing and auth tokens",
+    "nodes": "Manage gateway-owned nodes (pairing, status, invoke, and media)",
+    "exec-policy": "Show or synchronize requested exec policy with host approvals",
+    "exec-approvals": "Manage exec approvals (alias for approvals)",
+    "approvals": "Manage approval policy and pending requests",
+    "capability": "Run provider capability commands (fallback alias: infer)",
+    "infer": "Run provider-backed inference commands through a stable CLI surface",
+    "telemetry": "Inspect and manage anonymous usage telemetry",
+    "promos": "Discover and claim promotional model offers from ClawHub",
+    "system": "System tools (events, heartbeat, presence)",
+    "logs": "Tail gateway file logs via RPC",
+    "daemon": "Manage the Gateway service (launchd/systemd/schtasks)",
+    "sessions": "List stored conversation sessions",
+    "audit": "Inspect activity records and exact-run identity context",
+    "health": "Fetch health from the running gateway",
+    "status": "Show channel health and recent session recipients",
+    "agent": "Run an agent turn via the Gateway (use --local for embedded)",
+    "transcripts": "Inspect stored transcripts",
+    "mcp": "Manage OpenClaw mcp.servers config and channel bridge",
+    "message": "Send, read, and manage messages and channel actions",
+    "uninstall": "Uninstall the gateway service + local data",
+    "reset": "Reset local config/state (keeps the CLI installed)",
+    "dashboard": "Open the Control UI with your current token",
+    "triage": "Collect sanitized diagnostics and open a local coding agent for repair",
+    "storage": "List, initialize, and test configured storage locations",
+    "migrate": "Import state from another agent system",
+    "database": "Inspect database compatibility, manage ownership, and port database stores",
+    "backup": "Create, verify, and restore backup archives and SQLite snapshots",
+    "templates": "Author and add OpenClaw Templates",
+    "configure": "Interactive configuration for credentials, channels, gateway, and agent defaults",
+    "onboard": "Guided setup for auth, models, Gateway, workspace, channels, and skills",
 
     "acp": "CLI subcommand",
     "agents": "Agents action",
@@ -125,6 +197,52 @@ CLI_SUBCOMMANDS: Dict[str, str] = {
 # All Slash Commands Catalog
 # ---------------------------------------------------------------------------
 ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
+    {"name": "secrets", "category": "openclaw", "description": "Manage secrets runtime and environment variables", "usage": "/secrets [list|get|set]"},
+    {"name": "security", "category": "openclaw", "description": "Audit local configuration and state for security risks", "usage": "/security"},
+    {"name": "channels", "category": "openclaw", "description": "Manage connected chat channels (Discord, Telegram, WhatsApp, Slack)", "usage": "/channels [list|test]"},
+    {"name": "pair", "category": "openclaw", "description": "Generate companion pairing setup code or QR code", "usage": "/pair [qr|code]"},
+    {"name": "nodes", "category": "openclaw", "description": "Manage gateway-owned paired companion nodes", "usage": "/nodes [list|pair]"},
+    {"name": "bash", "category": "openclaw", "description": "Run shell commands on the host", "usage": "/bash <command>"},
+    {"name": "queue", "category": "openclaw", "description": "Adjust turn queue settings (fifo, steer, drop)", "usage": "/queue [mode]"},
+    {"name": "exec", "category": "openclaw", "description": "Configure execution environment defaults (cwd, env)", "usage": "/exec [defaults]"},
+    {"name": "elevated", "category": "openclaw", "description": "Toggle elevated execution permissions (sudo/admin)", "usage": "/elevated [on|off]"},
+    {"name": "reasoning", "category": "openclaw", "description": "Toggle reasoning/thinking visibility in output", "usage": "/reasoning [on|off]"},
+    {"name": "fast", "category": "openclaw", "description": "Toggle fast priority inference mode", "usage": "/fast [on|off]"},
+    {"name": "trace", "category": "openclaw", "description": "Toggle plugin trace lines in the transcript", "usage": "/trace [on|off]"},
+    {"name": "verbose", "category": "openclaw", "description": "Toggle verbose execution logging mode", "usage": "/verbose [on|off]"},
+    {"name": "think", "category": "openclaw", "description": "Set model thinking level (xhigh, max, adaptive, off)", "usage": "/think [level]"},
+    {"name": "compact", "category": "openclaw", "description": "Trigger manual context compaction", "usage": "/compact"},
+    {"name": "name", "category": "openclaw", "description": "Name or rename the active session", "usage": "/name <title>"},
+    {"name": "send", "category": "openclaw", "description": "Control outbound message delivery policy (allow/deny)", "usage": "/send [allow|deny|inherit]"},
+    {"name": "activation", "category": "openclaw", "description": "Set group chat activation mode (mention, all, steer)", "usage": "/activation [mention|all|steer]"},
+    {"name": "update", "category": "openclaw", "description": "Check for updates, apply, and restart", "usage": "/update"},
+    {"name": "restart", "category": "openclaw", "description": "Restart the OpenClaw service cleanly", "usage": "/restart"},
+    {"name": "stop", "category": "openclaw", "description": "Stop the currently running agent turn immediately", "usage": "/stop"},
+    {"name": "usage", "category": "openclaw", "description": "Show provider token usage, limits, and cost summaries", "usage": "/usage"},
+    {"name": "followup", "category": "openclaw", "description": "Queue message as an immediate follow-up turn", "usage": "/followup <message>"},
+    {"name": "steer", "category": "openclaw", "description": "Send live guidance to the active run in this session", "usage": "/steer <guidance>"},
+    {"name": "agents", "category": "openclaw", "description": "List agent personas and conversation bindings", "usage": "/agents"},
+    {"name": "acp", "category": "openclaw", "description": "Manage ACP sessions and IDE runtime options", "usage": "/acp"},
+    {"name": "subagents", "category": "openclaw", "description": "Inspect active and completed subagent runs for session", "usage": "/subagents"},
+    {"name": "session", "category": "openclaw", "description": "Manage conversation bindings and session lifecycle", "usage": "/session [list|switch|settings]"},
+    {"name": "whoami", "category": "openclaw", "description": "Show your channel sender id, permission tier, and role", "usage": "/whoami"},
+    {"name": "tts", "category": "openclaw", "description": "Control text-to-speech voice synthesis (on/off/status)", "usage": "/tts [on|off|status]"},
+    {"name": "export-trajectory", "category": "openclaw", "description": "Export a JSONL trajectory bundle for the active session", "usage": "/export-trajectory [file]"},
+    {"name": "export-session", "category": "openclaw", "description": "Export current session to a standalone HTML file in the workspace", "usage": "/export-session [path]"},
+    {"name": "fork", "category": "openclaw", "description": "Fork this conversation into a separate thread branch", "usage": "/fork [name]"},
+    {"name": "btw", "category": "openclaw", "description": "Ask a side question without changing future session context", "usage": "/btw <question>"},
+    {"name": "context", "category": "openclaw", "description": "Explain how context is built and token allocation", "usage": "/context"},
+    {"name": "approve", "category": "openclaw", "description": "Review, approve, or deny pending tool execution requests", "usage": "/approve [id|all|deny]"},
+    {"name": "allowlist", "category": "openclaw", "description": "List, add, or remove security allowlist entries", "usage": "/allowlist [list|add|remove] [pattern]"},
+    {"name": "openclaw", "category": "openclaw", "description": "Run the OpenClaw setup and repair assistant", "usage": "/openclaw"},
+    {"name": "login", "category": "openclaw", "description": "Connect a model provider or OAuth session", "usage": "/login [provider]"},
+    {"name": "diagnostics", "category": "openclaw", "description": "Request Gateway diagnostics and feedback bundle export", "usage": "/diagnostics [note]"},
+    {"name": "goal", "category": "openclaw", "description": "Show or control the active autonomous goal", "usage": "/goal [status|start|edit|pause|resume|complete|block|clear]"},
+    {"name": "loop", "category": "openclaw", "description": "Run and manage recurring autonomous prompts", "usage": "/loop [interval] <prompt>"},
+    {"name": "learn", "category": "openclaw", "description": "Save lessons from recent work to skills or memory", "usage": "/learn [request]"},
+    {"name": "dashboard", "category": "openclaw", "description": "Create or update this session's web dashboard view", "usage": "/dashboard [request]"},
+    {"name": "skill", "category": "openclaw", "description": "Run an OpenClaw skill directly by name", "usage": "/skill <name> [input]"},
+    {"name": "commands", "category": "openclaw", "description": "List all OpenClaw slash commands", "usage": "/commands"},
 
     {"name": "clear", "category": "core", "description": "Core command", "usage": "/clear"},
     {"name": "exit", "category": "core", "description": "Core command", "usage": "/exit"},
@@ -311,6 +429,17 @@ ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
 ]
 
 
+
+OPENCLAW_COMMAND_NAMES: Set[str] = {
+    "commands", "skill", "dashboard", "learn", "loop", "status", "goal", "diagnostics", "login",
+    "openclaw", "allowlist", "approve", "context", "btw", "fork", "export-session", "export-trajectory",
+    "tts", "whoami", "session", "subagents", "acp", "agents", "steer", "followup", "usage", "stop",
+    "restart", "update", "activation", "send", "name", "compact", "think", "verbose", "trace", "fast",
+    "reasoning", "elevated", "exec", "queue", "bash", "gateway", "cron", "doctor", "install", "permission",
+    "webhooks", "nodes", "pair", "channels", "security", "secrets", "help", "clear", "reset", "exit", "quit"
+}
+
+
 class CommandRegistry:
     """Master registry and execution engine for Omni slash commands and profiles."""
 
@@ -351,7 +480,10 @@ class CommandRegistry:
         allowed = prof["allowed_categories"]
 
         for cmd in self.commands.values():
-            cmd.enabled = cmd.category in allowed
+            if profile_name.lower() == "openclaw" and cmd.name in OPENCLAW_COMMAND_NAMES:
+                cmd.enabled = True
+            else:
+                cmd.enabled = cmd.category in allowed
 
         cfg_path = Path(__file__).resolve().parent.parent.parent / "omni.config.json"
         try:
