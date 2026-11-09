@@ -72,6 +72,46 @@ async def find(args: dict, context: dict = None) -> str:
     return "\n".join(out) or "(no files)"
 
 
+async def read(args: dict, context: dict = None) -> str:
+    p = _resolve(args.get("path", ""))
+    if not p.is_file():
+        raise FileNotFoundError(f"File not found: {p}")
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    off = max(int(args.get("offset", 1)), 1) - 1
+    lim = int(args["limit"]) if args.get("limit") else 2000
+    chunk = lines[off:off + lim]
+    more = f"\n[{len(lines) - off - lim} more lines; use offset={off + lim + 1}]" if off + lim < len(lines) else ""
+    return "\n".join(chunk) + more
+
+
+async def write(args: dict, context: dict = None) -> str:
+    p = _resolve(args.get("path", ""))
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(args.get("content", ""), encoding="utf-8")
+    return f"Wrote {len(args.get('content', ''))} bytes to {p}"
+
+
+async def bash(args: dict, context: dict = None) -> str:
+    import asyncio
+    proc = await asyncio.create_subprocess_shell(args["command"], cwd=str(workspace_root()),
+                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=float(args.get("timeout", 120)))
+    except asyncio.TimeoutError:
+        proc.kill()
+        return "[timed out]"
+    text = out.decode("utf-8", errors="replace")
+    if len(text) > 20000:
+        text = "[truncated]\n" + text[-20000:]
+    return (text.strip() or "(no output)") + (f"\n[exit {proc.returncode}]" if proc.returncode else "")
+
+
+async def ls(args: dict, context: dict = None) -> str:
+    p = _resolve(args.get("path", "."))
+    items = sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))[: int(args.get("limit", 500))]
+    return "\n".join(i.name + ("/" if i.is_dir() else "") for i in items) or "(empty)"
+
+
 def _tool(name, desc, props, required, fn):
     return CanonicalTool(name=name, description=desc, handler=fn, source="native", enabled=True,
                          parameters={"type": "object", "properties": props, "required": required})
@@ -87,3 +127,11 @@ def register(registry) -> None:
          "ignoreCase": {"type": "boolean"}, "limit": {"type": "integer"}}, ["pattern"], grep))
     registry.register_tool(_tool("find", "Find files by glob pattern.",
         {"pattern": s("Glob, e.g. *.ts"), "path": s("Directory"), "limit": {"type": "integer"}}, ["pattern"], find))
+    registry.register_tool(_tool("read", "Read a file (text). Use offset/limit for large files.",
+        {"path": s("File path"), "offset": {"type": "integer"}, "limit": {"type": "integer"}}, ["path"], read))
+    registry.register_tool(_tool("write", "Create or overwrite a file.",
+        {"path": s("File path"), "content": s("File content")}, ["path", "content"], write))
+    registry.register_tool(_tool("bash", "Run a shell command in the workspace.",
+        {"command": s("Command"), "timeout": {"type": "integer", "description": "Seconds (default 120)"}}, ["command"], bash))
+    registry.register_tool(_tool("ls", "List a directory.",
+        {"path": s("Directory"), "limit": {"type": "integer"}}, [], ls))

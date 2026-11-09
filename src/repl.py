@@ -286,7 +286,11 @@ async def run_rich_repl(
 
             # Handle Slash Commands via CommandExecutor
             # Handle Slash Commands strictly locally (NEVER forward /commands to LLM)
-            if line.startswith("/"):
+            from .features.prompt_templates import expand as _expand_prompt
+            _expanded = _expand_prompt(line) if line.startswith("/") else None
+            if _expanded:
+                line = _expanded  # Pi prompt template or /skill:name -> sent to the model
+            if line.startswith("/") and not _expanded:
                 def set_model_cb(new_m):
                     nonlocal active_model
                     active_model = router.resolve_model(new_m)
@@ -316,6 +320,11 @@ async def run_rich_repl(
                 )
             finally:
                 spinner.stop()
+                try:
+                    from .kernel.session_store import SessionStore
+                    SessionStore().save(session_state)
+                except Exception:
+                    pass
 
             # Render response in themed rounded chat bubble
             print_rich_markdown(response, model_name=active_model)

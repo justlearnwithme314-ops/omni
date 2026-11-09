@@ -105,6 +105,8 @@ class CommandExecutor:
                 lines.append("\nUsage: /profile <pi|omp|hermes|openclaw|full>")
                 return True, "\n".join(lines)
             if self.registry.apply_profile(arg):
+                from . import pi_profile
+                pi_profile.apply(arg.lower(), self)
                 return True, f"[✓] Switched command profile to: {arg.upper()} ({COMMAND_PROFILES[arg.lower()]['description']})"
             return True, f"[!] Unknown profile '{arg}'. Available: {list(COMMAND_PROFILES.keys())}"
 

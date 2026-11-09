@@ -261,6 +261,7 @@ class PermissionGate:
             "powershell",
             "zsh",
             "execute_bash",
+            "bash",
             "sql",
             "sqlite",
             "query",

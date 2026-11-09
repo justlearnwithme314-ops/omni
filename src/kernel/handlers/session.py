@@ -5,8 +5,13 @@ from . import HandlerContext, command
 
 @command("new", "reset", "fresh")
 def new_session(arg: str, ctx: HandlerContext) -> str:
+    import uuid
+    from ..session_store import SessionStore
     st = ctx.state
+    if st.messages:
+        SessionStore().save(st)
     st.messages.clear()
+    st.session_id = uuid.uuid4().hex[:12]
     for attr in ("turn_index", "tool_calls"):
         if hasattr(st, attr):
             setattr(st, attr, 0 if isinstance(getattr(st, attr), int) else [])

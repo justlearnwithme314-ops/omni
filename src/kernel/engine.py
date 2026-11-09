@@ -665,6 +665,9 @@ class KernelEngine:
         mode = getattr(self.config, "active_mode", "autonomous")
         active_model = model or getattr(self.config, "default_model", "google-antigravity/gemini-2.5-flash")
         from ..features.context_files import project_context, skills_block
+        if getattr(self, "minimal_prompt", False):
+            from .pi_profile import MINIMAL_PROMPT
+            return MINIMAL_PROMPT + "".join(f"\n\n{s}" for s in (project_context(), skills_block(limit=20)) if s)
         extra = "".join(f"\n\n{s}" for s in (project_context(), skills_block()) if s)
         return (
             f"You are Omni, a fast, modular, and extensible agentic AI system.\n"
