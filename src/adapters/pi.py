@@ -167,7 +167,7 @@ class NodeProcessManager:
 
         runner_js = os.path.join(os.path.dirname(__file__), "pi_runner.js")
         self._proc = subprocess.Popen(
-            [node_bin, "--experimental-transform-types", "--no-warnings", "--import", os.path.join(os.path.dirname(__file__), "pi_register.mjs"), runner_js],
+            [node_bin, "--experimental-transform-types", "--no-warnings", "--import", Path(os.path.join(os.path.dirname(__file__), "pi_register.mjs")).resolve().as_uri(), runner_js],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -197,12 +197,18 @@ class NodeProcessManager:
                 proc.stdin.write(json.dumps(msg) + "\n")
                 proc.stdin.flush()
 
-                raw_line = proc.stdout.readline()
-                if not raw_line:
-                    self._proc = None
-                    return None
-
-                data = json.loads(raw_line)
+                data = None
+                while data is None:  # skip stray (non-JSON / other-id) output from extensions
+                    raw_line = proc.stdout.readline()
+                    if not raw_line:
+                        self._proc = None
+                        return None
+                    try:
+                        cand = json.loads(raw_line)
+                    except ValueError:
+                        continue
+                    if isinstance(cand, dict) and cand.get("id") == req_id:
+                        data = cand
                 if "error" in data:
                     return None
                 return data.get("result")
