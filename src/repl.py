@@ -103,10 +103,26 @@ class OmniCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):
                         yield Completion(feat, start_position=-len(prefix), display_meta=f"Feature ({is_on})")
 
 
-def print_rich_markdown(content: str):
-    """Render markdown response beautifully with rich if available."""
+def print_rich_markdown(content: str, model_name: str = "Omni"):
+    """Render markdown response beautifully with rich panel and active theme."""
     if HAVE_RICH and console:
-        console.print(Markdown(content))
+        from rich import box
+        from rich.panel import Panel
+        from .features.themes import ThemeManager
+        tm = ThemeManager()
+        theme = tm.get_theme()
+        safe_console = Console(safe_box=False)
+        short_model = model_name.split("/")[-1] if "/" in model_name else model_name
+        panel = Panel(
+            Markdown(content),
+            title=f"[bold {theme.primary}]● {short_model}[/bold {theme.primary}]",
+            border_style=theme.panel_border,
+            box=box.ROUNDED,
+            padding=(1, 2)
+        )
+        safe_console.print()
+        safe_console.print(panel)
+        safe_console.print()
     else:
         print(content)
 
@@ -187,15 +203,13 @@ async def run_rich_repl(
             f"<i>Type /help for commands</i> "
         )
 
-    print("\n[*] Interactive REPL active. Use Up/Down arrows for history, Tab for suggestions.")
-    print("[*] Available slash commands: /model <name>, /mode <mode>, /toggle <feat>, /tools, /clear, exit\n")
-
+        
     session_state = SessionState()
 
     while True:
         try:
             model_short = active_model.split("/")[-1]
-            prompt_str = f"[{model_short}] > "
+            prompt_str = f"◆ [{model_short}] ❯ "
 
             if session:
                 line = await session.prompt_async(prompt_str, bottom_toolbar=get_bottom_toolbar)
@@ -319,7 +333,7 @@ async def run_rich_repl(
             )
 
             print()
-            print_rich_markdown(response)
+            print_rich_markdown(response, model_name=active_model)
 
         except (KeyboardInterrupt, asyncio.CancelledError):
             print("\n[Canceled turn. Type exit to quit.]")

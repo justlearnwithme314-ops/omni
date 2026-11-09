@@ -675,7 +675,7 @@ class KernelEngine:
         try:
             from rich.console import Console
             from rich.panel import Panel
-            c = Console()
+            c = Console(safe_box=False)
             arg_str = json.dumps(tool_args, indent=2) if tool_args else "(no arguments)"
             c.print(Panel(arg_str, title=f"[bold yellow]Tool Call: {tool_name}[/bold yellow]", border_style="yellow", expand=False))
         except Exception:
@@ -685,7 +685,7 @@ class KernelEngine:
         try:
             from rich.console import Console
             from rich.panel import Panel
-            c = Console()
+            c = Console(safe_box=False)
             res_str = tool_result if isinstance(tool_result, str) else json.dumps(tool_result, indent=2, default=str)
             if len(res_str) > 600:
                 res_str = res_str[:600] + "... [truncated]"

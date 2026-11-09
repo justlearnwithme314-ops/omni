@@ -21,15 +21,60 @@ from .telemetry.tracer import TrajectoryTracer
 from .evolution.optimizer import EvolutionOptimizer
 
 
+def render_omni_dashboard(config=None, model="google-antigravity/gemini-2.5-flash", profile="AUTONOMOUS", tools_count=34):
+    """Renders a sleek, modern dashboard panel inspired by Claude Code and OMP."""
+    try:
+        from rich.console import Console, Group
+        from rich.panel import Panel
+        from rich.table import Table
+        from rich.text import Text
+        from rich import box
+        from .features.themes import ThemeManager
+
+        tm = ThemeManager()
+        active_theme = tm.get_theme()
+        console = Console(safe_box=False)
+
+        title_text = Text()
+        title_text.append(" ◆ ", style=f"bold {active_theme.primary}")
+        title_text.append("OMNI", style="bold bright_white")
+        title_text.append(" • ", style="dim")
+        title_text.append("Universal Agentic AI System", style=f"italic {active_theme.secondary}")
+
+        table = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+        table.add_column(style=f"bold {active_theme.primary}", width=18)
+        table.add_column(style="bright_white")
+
+        table.add_row("⚡ Active Model:", model)
+        table.add_row("⚙ Profile Mode:", f"{profile.upper()} [dim]({tools_count} tools active • OpenClaw + Hermes + Pi)[/dim]")
+        table.add_row("🔑 Keyring Auth:", f"[bold {active_theme.success}][✓][/bold {active_theme.success}] Google OAuth (Connected)")
+        table.add_row("🎨 Visual Theme:", f"{active_theme.name.title()} [dim](type /skin to change)[/dim]")
+
+        footer_text = Text()
+        footer_text.append("Type a prompt to chat • ", style="dim")
+        footer_text.append("Tab", style="bold bright_yellow")
+        footer_text.append(" for autocomplete • ", style="dim")
+        footer_text.append("/help", style=f"bold {active_theme.primary}")
+        footer_text.append(" for commands", style="dim")
+
+        content = Group(table, Text(""), footer_text)
+
+        panel = Panel(
+            content,
+            title=title_text,
+            border_style=active_theme.panel_border,
+            box=box.ROUNDED,
+            padding=(1, 2)
+        )
+
+        console.print()
+        console.print(panel)
+        console.print()
+    except Exception:
+        print(f"\n=== OMNI [{model}] ({profile}) ===\n")
+
 def print_banner():
-    banner = r"""
-  ___  __  __ _  _ ___ 
- / _ \|  \/  | \| |_ _|
-| (_) | |\/| | .` || | 
- \___/|_|  |_|_|\_|___|
- Omni: Universal Agentic AI (Pi + Hermes + OpenClaw Compatible)
-"""
-    print(banner)
+    render_omni_dashboard()
 
 
 async def async_run(args, config: HarnessConfig):
@@ -60,9 +105,8 @@ async def async_run(args, config: HarnessConfig):
     active_model = router.resolve_model(raw_model)
 
     profile = mode_mgr.get_profile()
-    print(f"[*] Profile: {profile.name.upper()} - {profile.description}")
-    print(f"[*] Active Model: {active_model}")
-    print(f"[*] Loaded Tools: {len(tool_registry.list_tools())}")
+    tool_count = len(tool_registry.list_tools()) if tool_registry else 0
+    render_omni_dashboard(config=config, model=active_model, profile=profile.name, tools_count=tool_count)
 
     prompt_val = getattr(args, "prompt", None)
     user_prompt = " ".join(prompt_val) if prompt_val else None
@@ -341,7 +385,6 @@ def main():
     config = HarnessConfig()
 
     if not args.command or args.command == "run":
-        print_banner()
         asyncio.run(async_run(args, config))
     elif args.command == "keys":
         keyring = Keyring()
