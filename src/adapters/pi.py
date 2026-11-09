@@ -210,9 +210,11 @@ class NodeProcessManager:
                     if isinstance(cand, dict) and cand.get("id") == req_id:
                         data = cand
                 if "error" in data:
+                    logger.debug("PiRunner %s error: %s", params.get("extension_path", ""), data["error"].get("message", "")[:200])
                     return None
                 return data.get("result")
-            except Exception:
+            except Exception as exc:
+                logger.debug("PiRunner request %s failed: %r", method, exc)
                 self._proc = None
                 return None
 
@@ -317,6 +319,13 @@ class PiAdapter:
                         target_files.append(cand_file)
                         break
 
+        from ..paths import user_data_dir
+        cache_file = user_data_dir() / "pi_discovery_cache.json"
+        try:
+            cache = json.loads(cache_file.read_text(encoding="utf-8"))
+        except Exception:
+            cache = {}
+        cache_dirty = False
         seen_paths = set()
         for ext_file in target_files:
             ext_str = str(ext_file).replace("\\", "/")
@@ -325,7 +334,22 @@ class PiAdapter:
             seen_paths.add(ext_str)
 
             try:
-                result = self._runner.send_request("discover", {"extension_path": ext_str}, timeout=5.0)
+                try:
+                    st = ext_file.stat()
+                    ckey = f"{ext_str}|{st.st_mtime_ns}|{st.st_size}"
+                except OSError:
+                    ckey = ext_str
+                if ckey in cache:
+                    result = {"tools": cache[ckey]}
+                else:
+                    result = self._runner.send_request("discover", {"extension_path": ext_str}, timeout=5.0)
+                    cache[ckey] = (result or {}).get("tools", [])
+                    cache_dirty = True
+                if result is None:  # failed extension may have poisoned the shared runner: restart it
+                    proc = self._runner._proc
+                    if proc is not None and proc.poll() is None:
+                        proc.kill()
+                    self._runner._proc = None
                 tool_list = (result or {}).get("tools", [])
 
                 for tool_def in tool_list:
@@ -349,5 +373,11 @@ class PiAdapter:
             except Exception as e:
                 logger.debug(f"PiAdapter: Skipping {ext_file.name}: {e}")
 
+        if cache_dirty:
+            try:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(cache), encoding="utf-8")
+            except OSError:
+                pass
         self.tools = discovered
         return DiscoveryResult(discovered)

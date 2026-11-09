@@ -124,7 +124,7 @@ rl.on("line", async (line) => {
       }
       let res;
       if (typeof tool.execute === "function") {
-        res = await Promise.resolve(tool.execute("call_" + Date.now(), args || {}, undefined, undefined, extData.ctx));
+        res = await Promise.resolve(tool.execute("call_" + Date.now(), args || {}, undefined, undefined, ext.ctx));
       } else if (typeof tool.handler === "function") {
         res = await Promise.resolve(tool.handler(args || {}));
       } else {

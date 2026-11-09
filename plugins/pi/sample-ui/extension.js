@@ -10,7 +10,7 @@ module.exports = function(pi) {
             },
             required: ["title"]
         },
-        async execute(args) {
+        async execute(_toolCallId, args) {
             const t = args.title || "";
             const border = "=".repeat(t.length + 8);
             return border + "\n=== " + t + " ===\n" + border;
