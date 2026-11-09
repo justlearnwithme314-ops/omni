@@ -186,14 +186,14 @@ class VisualCanvasManager:
                 self._send(404, b'{"error":"not found"}', "application/json")
 
             def do_POST(self):
+                raw_body = self.rfile.read(min(int(self.headers.get("Content-Length", 0)), 1_000_000))
                 if urllib.parse.urlparse(self.path).path != "/canvas":
                     return self._send(404, b'{"error":"not found"}', "application/json")
                 supplied = self.headers.get("Authorization", "").removeprefix("Bearer ").strip()
                 if not hmac.compare_digest(supplied, manager.token):
                     return self._send(403, b'{"error":"forbidden"}', "application/json")
                 try:
-                    length = min(int(self.headers.get("Content-Length", 0)), 1_000_000)
-                    data = json.loads(self.rfile.read(length).decode("utf-8"))
+                    data = json.loads(raw_body.decode("utf-8"))
                     doc = manager.create_document(
                         str(data.get("title", "Untitled")), str(data.get("content", "")), str(data.get("kind", "mermaid"))
                     )

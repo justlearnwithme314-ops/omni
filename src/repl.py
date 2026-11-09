@@ -53,9 +53,10 @@ from .paths import history_file as _history_file
 class OmniCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):
     """Context-aware auto-completer showing live dropdown suggestions as you type."""
 
-    def __init__(self, feature_registry: FeatureRegistry, command_registry: Optional[CommandRegistry] = None):
+    def __init__(self, feature_registry: FeatureRegistry, command_registry: Optional[CommandRegistry] = None, handled=None):
         self.feature_registry = feature_registry
         self.command_registry = command_registry
+        self.handled = handled or set()
         self.modes = list(PROFILES.keys())
         self.models = list(MODEL_ALIASES.keys())
         self.features = list(CANONICAL_FEATURES.keys())
@@ -69,7 +70,7 @@ class OmniCompleter(Completer if HAVE_PROMPT_TOOLKIT else object):
         # 1. Live Slash Command completions (pops up as soon as user types '/')
         if text.startswith("/") and " " not in text:
             if self.command_registry:
-                active_cmds = self.command_registry.get_active_commands()
+                active_cmds = self.command_registry.get_listed_commands(self.handled)
                 for cmd in active_cmds:
                     slash_name = f"/{cmd.name}"
                     if slash_name.startswith(text.lower()):
@@ -190,7 +191,7 @@ async def run_rich_repl(
     session = None
     if HAVE_PROMPT_TOOLKIT:
         try:
-            completer = OmniCompleter(feature_registry, cmd_registry)
+            completer = OmniCompleter(feature_registry, cmd_registry, handled=cmd_executor.handled_names())
             session = PromptSession(
                 history=FileHistory(history_file),
                 auto_suggest=AutoSuggestFromHistory(),
@@ -279,7 +280,7 @@ async def run_rich_repl(
             if not line:
                 continue
 
-            if line.lower() in ["exit", "quit", ":q"]:
+            if line.lower() in ["exit", "quit", ":q", "/exit", "/quit"]:
                 print("Exiting Omni REPL. Goodbye!")
                 break
 

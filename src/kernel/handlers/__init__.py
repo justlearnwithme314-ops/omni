@@ -65,4 +65,4 @@ async def dispatch(name: str, arg: str, executor: Any, state: Any,
         return True, f"[!] /{name} failed: {e}"
 
 
-from . import subsystems  # noqa: E402,F401  (registers handlers on import)
+from . import session, subsystems  # noqa: E402,F401  (registers handlers on import)

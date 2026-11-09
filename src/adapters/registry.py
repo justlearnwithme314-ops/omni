@@ -326,6 +326,9 @@ class MasterToolRegistry:
         self._register_native_tools()
 
         
+        from .native_tools import register as _register_core_tools
+        _register_core_tools(self)
+
         # --- 4. Browser DevTools Protocol (CDP) Relay Tool ---
         async def browser_cdp_handler(args: dict, context: dict = None) -> str:
             from ..kernel.services import services

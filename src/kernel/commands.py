@@ -512,6 +512,10 @@ class CommandRegistry:
                 active.append(cmd)
         return active
 
+    def get_listed_commands(self, handled) -> List[CommandDefinition]:
+        """Active commands that actually have a handler (for /help and autocomplete)."""
+        return [c for c in self.get_active_commands() if c.name in handled]
+
     def get_command(self, cmd_name: str) -> Optional[CommandDefinition]:
         name = cmd_name.lstrip("/").lower()
         cmd = self.commands.get(name)

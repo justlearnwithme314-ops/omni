@@ -38,6 +38,7 @@ DEFAULT_FEATURES: Dict[str, bool] = {
     "context_compaction": True,
     "auth_gateway": True,
     "speculative_execution": False,
+    "permission_gates": True,
 }
 
 VALID_MODES: Set[str] = {"lean", "autonomous", "evolve"}

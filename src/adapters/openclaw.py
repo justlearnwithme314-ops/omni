@@ -239,7 +239,17 @@ class OpenClawAdapter:
         if not self._check_gates(metadata, name):
             return None
 
-        command_template = self._extract_command(body, skill_dir, frontmatter)
+        # Only an explicit entrypoint makes a skill callable. Markdown is never executed.
+        command_template = frontmatter.get("command") or frontmatter.get("entrypoint")
+        if not command_template:  # explicit "Execute command: ..." declaration only
+            for line in body.splitlines():
+                m = re.match(r"^(?:execute\s+command|command)\s*:\s*(.+)$", line.strip(), re.I)
+                if m:
+                    command_template = m.group(1).strip()
+                    break
+                if "{baseDir}" in line and not line.lstrip().startswith(("#", "-", "*", ">")):
+                    command_template = line.strip()
+                    break
         if not command_template:
             logger.debug(f"OpenClaw: No executable command found for skill '{name}' in {skill_dir}")
             return None

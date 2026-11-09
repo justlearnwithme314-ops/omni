@@ -664,11 +664,14 @@ class KernelEngine:
         """Construct default system prompt with explicit model introspection."""
         mode = getattr(self.config, "active_mode", "autonomous")
         active_model = model or getattr(self.config, "default_model", "google-antigravity/gemini-2.5-flash")
+        from ..features.context_files import project_context, skills_block
+        extra = "".join(f"\n\n{s}" for s in (project_context(), skills_block()) if s)
         return (
             f"You are Omni, a fast, modular, and extensible agentic AI system.\n"
             f"You are currently running on model: '{active_model}' in '{mode}' mode.\n"
             f"When asked who you are or which AI model you are using, introduce yourself as Omni and clearly state that your active underlying model is {active_model}.\n"
             f"Execute user requests accurately using available tools when necessary."
+            + extra
         )
 
     def _render_tool_call(self, tool_name: str, tool_args: Dict[str, Any]):

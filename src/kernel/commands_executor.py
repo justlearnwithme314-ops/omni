@@ -37,6 +37,15 @@ class CommandExecutor:
         self.tool_registry = tool_registry
         self.tracer = tracer
 
+    def handled_names(self) -> set:
+        import re as _re
+        from .handlers import registered
+        src = Path(__file__).read_text(encoding="utf-8")
+        names = set(registered())
+        for m in _re.finditer(r"^\s+(?:el)?if name (?:==|in) (.+?):\s*$", src, _re.M):
+            names |= set(_re.findall(r'"([^"]+)"', m.group(1)))
+        return names
+
     async def execute(self, line: str, state: SessionState, context: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
         """
         Executes a slash command string.
@@ -71,7 +80,7 @@ class CommandExecutor:
 
         # --- 1. Core & Pi Handlers ---
         if name == "help":
-            active_cmds = self.registry.get_active_commands()
+            active_cmds = self.registry.get_listed_commands(self.handled_names())
             lines = [f"\n=== Omni Slash Commands (Profile: {self.registry.active_profile.upper()}) ==="]
             categories = {}
             for c in active_cmds:
