@@ -29,6 +29,24 @@ class CanonicalTool:
     source: str  # 'openclaw' | 'hermes' | 'pi' | 'mcp' | 'native'
     enabled: bool = True
     metadata: dict = field(default_factory=dict)
+    check_fn: Optional[Callable[[], bool]] = None
+    check_ttl: float = 60.0
+    _last_check_time: float = field(default=0.0, init=False, repr=False)
+    _last_check_result: bool = field(default=True, init=False, repr=False)
+
+    def is_available(self) -> bool:
+        if self.check_fn is None:
+            return True
+        import time
+        now = time.time()
+        if now - self._last_check_time < self.check_ttl:
+            return self._last_check_result
+        try:
+            self._last_check_result = bool(self.check_fn())
+        except Exception:
+            self._last_check_result = False
+        self._last_check_time = now
+        return self._last_check_result
 
     def to_openai_schema(self) -> dict:
         """Convert tool to OpenAI Function Calling schema."""

@@ -282,7 +282,7 @@ class MasterToolRegistry:
         return [
             tool.to_openai_schema()
             for tool in self._tools.values()
-            if tool.enabled
+            if tool.enabled and tool.is_available()
         ]
 
     def discover_all(self) -> DiscoveryResult:

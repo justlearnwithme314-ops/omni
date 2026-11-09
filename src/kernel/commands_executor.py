@@ -436,4 +436,53 @@ class CommandExecutor:
             lines.append("Use /session switch <id> to load a session.")
             return True, "\n".join(lines)
 
+
+        elif name == "moa":
+            from ..features.moa import MixtureOfAgentsEngine
+            moa_engine = MixtureOfAgentsEngine(self.router)
+            query = arg or "Analyze the architectural advantages of modular agent design"
+            print(f"[*] Convening Mixture-of-Agents council for: '{query[:60]}...'")
+            report = await moa_engine.run_moa(query)
+            return True, f"\n=== Mixture-of-Agents Synthesis ({report['aggregator']}) ===\n{report['final_synthesis']}"
+
+        elif name == "egress":
+            from ..features.egress import EgressProxyFirewall
+            fw = getattr(self.engine, "_egress_firewall", EgressProxyFirewall())
+            if arg.startswith("allow "):
+                domain = arg[6:].strip().lower()
+                fw.allowed_domains.add(domain)
+                return True, f"[✓] Added '{domain}' to iron-proxy egress whitelist."
+            lines = ["\n--- Iron-Proxy Egress Firewall Whitelist ---"]
+            for d in sorted(fw.allowed_domains):
+                lines.append(f"  • {d}")
+            return True, "\n".join(lines)
+
+        elif name == "timeline":
+            from ..features.branching import TimelineBranchManager
+            bm = TimelineBranchManager()
+            return True, bm.render_ascii_dag(state.session_id)
+
+        elif name == "environment":
+            from ..features.environments import EnvironmentManager
+            em = getattr(self.engine, "_env_manager", EnvironmentManager(workspace_root=getattr(self.config, "root_dir", None)))
+            if arg:
+                if em.set_environment(arg.lower()):
+                    return True, f"[✓] Switched active execution environment to: {arg.upper()}."
+                return True, f"[!] Unknown environment '{arg}'. Available: {list(em.environments.keys())}"
+            return True, f"Active Execution Environment: {em.active_env_name.upper()} (Available: {list(em.environments.keys())})"
+
+        elif name == "personality":
+            if arg:
+                state.scratchpad["personality"] = arg
+                return True, f"[✓] Switched agent personality to: '{arg}'."
+            return True, f"Current personality: {state.scratchpad.get('personality', 'Omni Default')}. Usage: /personality <name>"
+
+        elif name in ("pet", "pets", "hatch"):
+            if name == "hatch":
+                mascot = "✦ Phoenix ✦"
+                state.scratchpad["active_pet"] = mascot
+                return True, f"[✓] You hatched a new Petdex companion: {mascot} (Level 1, Exp: 100)!"
+            pet = state.scratchpad.get("active_pet", "Omni Lobster 🦞")
+            return True, f"\n--- Petdex Active Mascot ---\n  ( •_•) < [{pet} is cheering you on! Level 2]\n  ( >🪓)> Keep shipping clean commits!"
+
         return False, ""
