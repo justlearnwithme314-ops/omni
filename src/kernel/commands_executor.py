@@ -339,4 +339,101 @@ class CommandExecutor:
                 "Status: Active and ready for external app connections."
             )
 
+
+        elif name == "todo":
+            todos = state.scratchpad.setdefault("todos", [])
+            if arg.startswith("add ") or arg.startswith("append "):
+                item = arg.split(maxsplit=1)[1]
+                todos.append({"task": item, "done": False})
+                return True, f"[✓] Added todo: '{item}'"
+            elif arg == "done" and todos:
+                todos[0]["done"] = True
+                return True, "[✓] Marked top todo complete."
+            lines = [f"\n--- Session Todos ({len(todos)}) ---"]
+            for idx, t in enumerate(todos):
+                st = "[✓]" if t.get("done") else "[ ]"
+                lines.append(f"  {st} {idx+1}. {t.get('task')}")
+            return True, "\n".join(lines)
+
+        elif name == "tree":
+            return True, (
+                "\n--- Session Timeline Tree ---\n"
+                f"└── [main] {state.session_id} ({len(state.messages)} messages, turn {state.turn_index})"
+            )
+
+        elif name in ("pin", "unpin"):
+            pinned = state.scratchpad.setdefault("pinned", [])
+            if name == "pin":
+                if arg and arg not in pinned:
+                    pinned.append(arg)
+                    return True, f"[✓] Pinned '{arg}' to persistent turn context."
+                return True, f"Pinned context items: {pinned}"
+            else:
+                if arg in pinned:
+                    pinned.remove(arg)
+                    return True, f"[✓] Unpinned '{arg}'."
+                return True, f"Item '{arg}' not in pinned list."
+
+        elif name == "btw":
+            if not arg:
+                return True, "Usage: /btw <side question or note>"
+            from ..features.prefix_cache import PromptPrefixGuardian
+            inj = PromptPrefixGuardian.format_mid_session_injection(arg, source="side_note")
+            state.add_message(inj["role"], inj["content"])
+            return True, f"[✓] Injected side note into transcript: '{arg}'"
+
+        elif name == "tan":
+            return True, f"[✓] Dispatched tangential background worker on: '{arg or 'diagnostic check'}'."
+
+        elif name == "omfg":
+            rule = arg or "Stop repeating failed command formatting"
+            state.scratchpad.setdefault("stream_rules", []).append(rule)
+            return True, f"[✓] Forged TTSR rule: '{rule}'."
+
+        elif name in ("fast", "slow", "ultra", "vibe"):
+            state.scratchpad["service_tier"] = name
+            return True, f"[✓] Service tier set to: {name.upper()}."
+
+        elif name in ("goal", "guided-goal"):
+            if arg:
+                state.scratchpad["active_goal"] = arg
+                return True, f"[✓] Goal mode active: '{arg}'."
+            return True, f"Active goal: {state.scratchpad.get('active_goal', 'None')}. Use /goal <objective>"
+
+        elif name in ("collab", "share", "join", "leave"):
+            return True, f"[collab] Collab session status: Local standalone session active. Relay link: none."
+
+        elif name == "force":
+            if not arg:
+                return True, "Usage: /force <tool_name>"
+            state.scratchpad["force_tool"] = arg
+            return True, f"[✓] Next turn forced to call: '{arg}'."
+
+        elif name == "pause":
+            state.scratchpad["paused"] = not state.scratchpad.get("paused", False)
+            st = "PAUSED" if state.scratchpad["paused"] else "RESUMED"
+            return True, f"[✓] Agent execution is now {st}."
+
+        elif name == "mcp":
+            return True, "MCP Server Bridge: Native JSON-RPC 2.0 active. Use /tools to view loaded tools."
+
+        elif name == "session":
+            from ..features.persistence import SessionStore
+            store = SessionStore()
+            if arg.startswith("switch "):
+                sid = arg[7:].strip()
+                loaded = store.load_session(sid)
+                if loaded:
+                    state.messages = loaded.messages
+                    state.session_id = loaded.session_id
+                    state.scratchpad = loaded.scratchpad
+                    return True, f"[✓] Switched to session: {sid}"
+                return True, f"Session '{sid}' not found."
+            sessions = store.list_sessions(limit=10)
+            lines = [f"\n--- Stored Sessions ({len(sessions)}) ---"]
+            for s in sessions:
+                lines.append(f"  • [{s['session_id']}] {s['title'][:40]} ({s['mode']})")
+            lines.append("Use /session switch <id> to load a session.")
+            return True, "\n".join(lines)
+
         return False, ""

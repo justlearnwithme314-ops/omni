@@ -330,6 +330,13 @@ def main():
     evolve_parser = subparsers.add_parser("evolve", help="Run Hermes self-evolution optimizer on failed traces")
     evolve_parser.add_argument("--patch", action="store_true", help="Auto-generate prompt patch for top failure")
 
+    # Register all 56 OMP CLI Subcommands dynamically
+    from .kernel.commands import CLI_SUBCOMMANDS
+    for cmd_name, cmd_desc in CLI_SUBCOMMANDS.items():
+        if cmd_name not in subparsers._name_parser_map:
+            sp = subparsers.add_parser(cmd_name, help=cmd_desc[:80])
+            sp.add_argument("args", nargs="*", help=f"Arguments for {cmd_name}")
+
     args = parser.parse_args()
     config = HarnessConfig()
 
@@ -361,6 +368,37 @@ def main():
         cmd_stats(args)
     elif args.command == "evolve":
         cmd_evolve(args)
+    elif args.command in CLI_SUBCOMMANDS:
+        from .kernel.commands import CommandRegistry
+        from .kernel.commands_executor import CommandExecutor
+        reg = CommandRegistry(config=config, active_profile=getattr(config, "command_profile", "full"))
+        keyring = Keyring()
+        router = ProviderRouter(keyring=keyring, config=config)
+        tool_registry = MasterToolRegistry(config=config, event_bus=EventBus())
+        tool_registry.discover_all()
+        tracer = TrajectoryTracer()
+        engine = KernelEngine(
+            config=config,
+            event_bus=EventBus(),
+            provider_router=router,
+            tool_registry=tool_registry,
+            tracer=tracer,
+        )
+        executor = CommandExecutor(
+            command_registry=reg,
+            engine=engine,
+            config=config,
+            router=router,
+            tool_registry=tool_registry,
+            tracer=tracer,
+        )
+        state = SessionState()
+        extra_args = " ".join(getattr(args, "args", []))
+        full_line = f"/{args.command} {extra_args}".strip()
+        handled, msg = asyncio.run(executor.execute(full_line, state))
+        if msg:
+            print(msg)
+
 
 
 if __name__ == "__main__":
