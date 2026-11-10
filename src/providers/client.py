@@ -200,6 +200,36 @@ def normalize_tools_for_anthropic(tools: list[dict[str, Any]]) -> list[dict[str,
     return formatted
 
 
+_GEMINI_SCHEMA_KEYS = {"type", "format", "description", "nullable", "enum", "properties", "required", "items",
+                       "minItems", "maxItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "anyOf", "title"}
+
+
+def _gemini_schema(s: Any) -> Any:
+    """Reduce a JSON Schema to the subset Gemini accepts (drops patternProperties, $ref, additionalProperties...)."""
+    if isinstance(s, list):
+        return [_gemini_schema(x) for x in s]
+    if not isinstance(s, dict):
+        return s
+    out: dict[str, Any] = {}
+    for k, v in s.items():
+        if k not in _GEMINI_SCHEMA_KEYS:
+            continue
+        if k == "properties" and isinstance(v, dict):
+            out[k] = {n: _gemini_schema(sub) for n, sub in v.items()}
+        elif k == "type" and isinstance(v, list):
+            real = [x for x in v if x != "null"]
+            out["type"] = real[0] if real else "string"
+            if "null" in v:
+                out["nullable"] = True
+        else:
+            out[k] = _gemini_schema(v)
+    if out.get("type") == "object" and "properties" not in out:
+        out["properties"] = {}
+    if "required" in out and isinstance(out.get("properties"), dict):
+        out["required"] = [r for r in out["required"] if r in out["properties"]]
+    return out
+
+
 def normalize_tools_for_google(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Format generic tools list to Google Gemini function declaration schema."""
     declarations = []
@@ -210,7 +240,7 @@ def normalize_tools_for_google(tools: list[dict[str, Any]]) -> list[dict[str, An
                 {
                     "name": fn.get("name"),
                     "description": fn.get("description", ""),
-                    "parameters": fn.get("parameters", {"type": "object", "properties": {}}),
+                    "parameters": _gemini_schema(fn.get("parameters", {"type": "object", "properties": {}})),
                 }
             )
         elif "name" in t:
@@ -219,9 +249,15 @@ def normalize_tools_for_google(tools: list[dict[str, Any]]) -> list[dict[str, An
                 {
                     "name": t["name"],
                     "description": t.get("description", ""),
-                    "parameters": params,
+                    "parameters": _gemini_schema(params),
                 }
             )
+    seen, unique = set(), []
+    for d in declarations:
+        if d["name"] not in seen:
+            seen.add(d["name"])
+            unique.append(d)
+    declarations = unique
     return [{"functionDeclarations": declarations}] if declarations else []
 
 

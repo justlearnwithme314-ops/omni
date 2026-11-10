@@ -203,12 +203,48 @@ def scoped_models(arg: str, ctx: HandlerContext) -> str:
 
 @command("login")
 def login(arg: str, ctx: HandlerContext) -> str:
+    """/login                  list providers and status
+    /login <provider>          env var -> imported OMP/Pi OAuth login -> hidden key prompt
+    /login <provider> <key>    store an API key directly"""
+    import getpass
+    from ...providers.keyring import ENV_KEY_MAP, Keyring
+    kr = Keyring()
     parts = arg.split()
-    if len(parts) < 2:
-        raise UsageError("Usage: /login <provider> <api-key>   (keys are stored in the local credentials DB)")
-    from ...providers.keyring import Keyring
-    Keyring().add_key(parts[0], parts[1])
-    return f"[✓] Stored key for {parts[0]}"
+    if not parts:
+        have = {}
+        for k in kr.list_keys():
+            have[k["provider"]] = have.get(k["provider"], 0) + 1
+        provs = sorted(set(ENV_KEY_MAP) | {"google-antigravity", "github-copilot"} | set(have))
+        lines = ["--- Providers (/login <provider> [api-key]) ---"]
+        for p in provs:
+            env = [e for e in ENV_KEY_MAP.get(p, []) if os.environ.get(e)]
+            st = f"{have[p]} stored key(s)" if p in have else (f"env {env[0]} set" if env else "not logged in")
+            lines.append(f"  {p:<20} {st}")
+        return "\n".join(lines)
+    prov = parts[0].lower()
+    if len(parts) > 1:
+        kr.add_key(prov, parts[1])
+        return f"[✓] Stored key for {prov}"
+    for e in ENV_KEY_MAP.get(prov, []):
+        if os.environ.get(e):
+            kr.add_key(prov, os.environ[e])
+            return f"[✓] Stored key for {prov} from ${e}"
+    from ...providers.oauth import OAuthManager
+    om = OAuthManager(kr)
+    if prov in ("google", "google-antigravity", "anthropic", "openai-codex", "github-copilot"):
+        try:
+            got = [k for k in om.import_from_omp() if prov in str(k.get("provider", ""))]
+        except Exception:
+            got = []
+        if got:
+            return f"[✓] Imported {len(got)} OAuth login(s) for {prov} from your Oh My Pi / Pi login"
+        if prov == "github-copilot":
+            return f"[✓] {om.login_device_code(prov)}"
+    key = getpass.getpass(f"API key for {prov} (hidden, empty to cancel): ").strip()
+    if not key:
+        return "Cancelled."
+    kr.add_key(prov, key)
+    return f"[✓] Stored key for {prov}"
 
 
 @command("logout")
