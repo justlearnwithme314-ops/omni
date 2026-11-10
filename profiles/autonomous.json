@@ -1,0 +1,8 @@
+{
+  "name": "autonomous",
+  "extends": "balanced",
+  "description": "Everything that exists today: MCP, Hermes, OpenClaw, Omni tools, remote nodes and canvas, with the permission gate on.",
+  "accent": "#c792ea",
+  "omni_registry": { "enabled": true, "sources": ["mcp", "hermes", "openclaw", "omni"] },
+  "prompt_append": "Work autonomously: plan, execute and verify multi-step tasks without waiting for confirmation unless an action is destructive."
+}

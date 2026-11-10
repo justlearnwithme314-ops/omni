@@ -1,0 +1,7 @@
+{
+  "name": "lean",
+  "extends": "pi",
+  "description": "Pi plus the read-only search tools (grep, find, ls). Still no plugin hosts beyond Pi extensions.",
+  "accent": "#2ac3de",
+  "tools": "read,bash,edit,write,grep,find,ls"
+}

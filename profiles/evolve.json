@@ -1,0 +1,6 @@
+{
+  "name": "evolve",
+  "extends": "autonomous",
+  "description": "Autonomous plus self-evolution bookkeeping (trajectories are the JSONL sessions; the optimizer runs offline).",
+  "accent": "#e0af68"
+}
