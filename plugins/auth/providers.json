@@ -1,28 +1,123 @@
 {
   "_doc": "Login providers. Override/extend by copying to ~/.omni/auth/providers.json (entries merge by id). flow: api_key | oauth_pkce | device_code. oauth_pkce: set redirect_port+redirect_path for a local callback, or manual_code=true to paste the code. OAuth client ids are the public ones used by the vendors' own CLIs (copied from Oh My Pi) - verify before relying on them.",
   "providers": [
-    {"id": "openai-codex", "name": "ChatGPT / OpenAI Codex (browser login)", "flow": "oauth_pkce",
-     "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
-     "authorize_url": "https://auth.openai.com/oauth/authorize", "token_url": "https://auth.openai.com/oauth/token",
-     "scopes": "openid profile email offline_access api.connectors.read api.connectors.invoke",
-     "redirect_port": 1455, "redirect_path": "/auth/callback",
-     "extra_params": {"id_token_add_organizations": "true", "codex_cli_simplified_flow": "true", "originator": "codex_cli_rs"}},
-    {"id": "anthropic-oauth", "name": "Claude Pro/Max (browser login)", "flow": "oauth_pkce",
-     "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-     "authorize_url": "https://claude.ai/oauth/authorize", "token_url": "https://console.anthropic.com/v1/oauth/token",
-     "scopes": "org:create_api_key user:profile user:inference",
-     "redirect_uri": "https://console.anthropic.com/oauth/code/callback", "manual_code": true,
-     "extra_params": {"code": "true"}, "token_format": "json"},
-    {"id": "github-copilot", "name": "GitHub Copilot (device code)", "flow": "device_code",
-     "client_id": "Ov23li8tweQw6odWQebz", "scopes": "read:user",
-     "device_url": "https://github.com/login/device/code", "token_url": "https://github.com/login/oauth/access_token"},
-    {"id": "openai", "name": "OpenAI API key", "flow": "api_key", "env": ["OPENAI_API_KEY"], "key_url": "https://platform.openai.com/api-keys"},
-    {"id": "anthropic", "name": "Anthropic API key", "flow": "api_key", "env": ["ANTHROPIC_API_KEY"], "key_url": "https://console.anthropic.com/settings/keys"},
-    {"id": "google", "name": "Google Gemini API key", "flow": "api_key", "env": ["GEMINI_API_KEY", "GOOGLE_API_KEY"], "key_url": "https://aistudio.google.com/apikey"},
-    {"id": "openrouter", "name": "OpenRouter API key", "flow": "api_key", "env": ["OPENROUTER_API_KEY"], "key_url": "https://openrouter.ai/keys", "base_url": "https://openrouter.ai/api/v1"},
-    {"id": "groq", "name": "Groq API key", "flow": "api_key", "env": ["GROQ_API_KEY"], "key_url": "https://console.groq.com/keys", "base_url": "https://api.groq.com/openai/v1"},
-    {"id": "xai", "name": "xAI API key", "flow": "api_key", "env": ["XAI_API_KEY"], "key_url": "https://console.x.ai", "base_url": "https://api.x.ai/v1"},
-    {"id": "deepseek", "name": "DeepSeek API key", "flow": "api_key", "env": ["DEEPSEEK_API_KEY"], "key_url": "https://platform.deepseek.com/api_keys", "base_url": "https://api.deepseek.com/v1"},
-    {"id": "mistral", "name": "Mistral API key", "flow": "api_key", "env": ["MISTRAL_API_KEY"], "key_url": "https://console.mistral.ai/api-keys", "base_url": "https://api.mistral.ai/v1"}
+    {
+      "id": "openai-codex",
+      "name": "ChatGPT / OpenAI Codex (browser login)",
+      "flow": "oauth_pkce",
+      "client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
+      "authorize_url": "https://auth.openai.com/oauth/authorize",
+      "token_url": "https://auth.openai.com/oauth/token",
+      "scopes": "openid profile email offline_access api.connectors.read api.connectors.invoke",
+      "redirect_port": 1455,
+      "redirect_path": "/auth/callback",
+      "extra_params": {
+        "id_token_add_organizations": "true",
+        "codex_cli_simplified_flow": "true",
+        "originator": "codex_cli_rs"
+      }
+    },
+    {
+      "id": "anthropic-oauth",
+      "name": "Claude Pro/Max (browser login)",
+      "flow": "oauth_pkce",
+      "client_id": "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+      "authorize_url": "https://claude.ai/oauth/authorize",
+      "token_url": "https://api.anthropic.com/v1/oauth/token",
+      "scopes": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+      "extra_params": {
+        "code": "true"
+      },
+      "token_format": "json",
+      "redirect_port": 54545,
+      "redirect_path": "/callback"
+    },
+    {
+      "id": "github-copilot",
+      "name": "GitHub Copilot (device code)",
+      "flow": "device_code",
+      "client_id": "Ov23li8tweQw6odWQebz",
+      "scopes": "read:user",
+      "device_url": "https://github.com/login/device/code",
+      "token_url": "https://github.com/login/oauth/access_token"
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI API key",
+      "flow": "api_key",
+      "env": [
+        "OPENAI_API_KEY"
+      ],
+      "key_url": "https://platform.openai.com/api-keys"
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic API key",
+      "flow": "api_key",
+      "env": [
+        "ANTHROPIC_API_KEY"
+      ],
+      "key_url": "https://console.anthropic.com/settings/keys"
+    },
+    {
+      "id": "google",
+      "name": "Google Gemini API key",
+      "flow": "api_key",
+      "env": [
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY"
+      ],
+      "key_url": "https://aistudio.google.com/apikey"
+    },
+    {
+      "id": "openrouter",
+      "name": "OpenRouter API key",
+      "flow": "api_key",
+      "env": [
+        "OPENROUTER_API_KEY"
+      ],
+      "key_url": "https://openrouter.ai/keys",
+      "base_url": "https://openrouter.ai/api/v1"
+    },
+    {
+      "id": "groq",
+      "name": "Groq API key",
+      "flow": "api_key",
+      "env": [
+        "GROQ_API_KEY"
+      ],
+      "key_url": "https://console.groq.com/keys",
+      "base_url": "https://api.groq.com/openai/v1"
+    },
+    {
+      "id": "xai",
+      "name": "xAI API key",
+      "flow": "api_key",
+      "env": [
+        "XAI_API_KEY"
+      ],
+      "key_url": "https://console.x.ai",
+      "base_url": "https://api.x.ai/v1"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek API key",
+      "flow": "api_key",
+      "env": [
+        "DEEPSEEK_API_KEY"
+      ],
+      "key_url": "https://platform.deepseek.com/api_keys",
+      "base_url": "https://api.deepseek.com/v1"
+    },
+    {
+      "id": "mistral",
+      "name": "Mistral API key",
+      "flow": "api_key",
+      "env": [
+        "MISTRAL_API_KEY"
+      ],
+      "key_url": "https://console.mistral.ai/api-keys",
+      "base_url": "https://api.mistral.ai/v1"
+    }
   ]
 }
