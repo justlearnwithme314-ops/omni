@@ -148,9 +148,17 @@ class CommandExecutor:
                 think = state.scratchpad.get("thinking_budget", "high")
                 return True, f"Active Model: {active_m} (thinking: {think})\nAliases: flash, flash-3.8, sonnet, opus, pro, gpt-4o, mini, deepseek, haiku, argon\nUsage: /model <name_or_alias>"
 
+            note = ""
+            if "/" in arg and arg.split("/", 1)[0].lower() in ("anthropic", "openai", "google", "openrouter", "groq", "xai", "deepseek", "mistral"):
+                from ..providers.model_list import validate
+                prov, mname = arg.split("/", 1)
+                fixed, note = validate(prov.lower(), mname)
+                if fixed is None:
+                    return True, note
+                arg = f"{prov}/{fixed}"
             if context and "switch_model" in context:
                 context["switch_model"](arg)
-            return True, f"[✓] Switched active model to: {arg}"
+            return True, f"[✓] Switched active model to: {arg}" + (f" {note}" if note else "")
 
         elif name == "tokens":
             msg_count = len(state.messages)

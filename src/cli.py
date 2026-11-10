@@ -94,6 +94,7 @@ async def async_run(args, config: HarnessConfig):
     event_bus = EventBus()
     keyring = Keyring()
     router = ProviderRouter(keyring=keyring, config=config)
+    router.allow_mock_fallback = False  # real provider errors must be shown, never replaced by fake replies
 
     mode_val = getattr(args, "mode", None) or config.active_mode
     mode_mgr = ModeManager(default_mode=mode_val)
