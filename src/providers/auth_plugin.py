@@ -169,8 +169,9 @@ class AuthPlugin:
         access = tok.get("access_token")
         if not access:
             raise LoginError(f"No access_token in response: {str(tok)[:150]}")
-        self.kr.add_key(pid, access, key_id=f"oauth_{pid}")
-        _save_token(pid, {"refresh_token": tok.get("refresh_token"), "expires_at": time.time() + int(tok.get("expires_in", 3600)),
+        store = p.get("store_as", pid)
+        self.kr.add_key(store, access, key_id=f"oauth_{pid}")
+        _save_token(pid, {"store_as": store, "refresh_token": tok.get("refresh_token"), "expires_at": time.time() + int(tok.get("expires_in", 3600)),
                           "token_url": p["token_url"], "client_id": p["client_id"]})
         return f"Logged in to {pid}" + (" (refresh token saved)" if tok.get("refresh_token") else "")
 
@@ -223,7 +224,7 @@ def refresh(pid: str, keyring: Optional[Keyring] = None) -> bool:
     if not t or not t.get("refresh_token") or t["expires_at"] - time.time() > 120:
         return False
     tok = _post(t["token_url"], {"grant_type": "refresh_token", "refresh_token": t["refresh_token"], "client_id": t["client_id"]})
-    (keyring or Keyring()).add_key(pid, tok["access_token"], key_id=f"oauth_{pid}")
+    (keyring or Keyring()).add_key(t.get("store_as", pid), tok["access_token"], key_id=f"oauth_{pid}")
     _save_token(pid, {**t, "refresh_token": tok.get("refresh_token", t["refresh_token"]),
                       "expires_at": time.time() + int(tok.get("expires_in", 3600))})
     return True

@@ -30,7 +30,8 @@
       },
       "token_format": "json",
       "redirect_port": 54545,
-      "redirect_path": "/callback"
+      "redirect_path": "/callback",
+      "store_as": "anthropic"
     },
     {
       "id": "github-copilot",

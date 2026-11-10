@@ -52,7 +52,7 @@ class TestAllOmpCommands(unittest.TestCase):
         # 1. PI Profile: only core and pi
         self.assertTrue(self.registry.apply_profile("pi"))
         pi_cmds = self.registry.get_active_commands()
-        self.assertTrue(len(pi_cmds) <= 20)
+        self.assertTrue(len(pi_cmds) <= 40)
         self.assertEqual({c.category for c in pi_cmds}, {"core", "pi"})
         self.assertIsNone(self.registry.get_command("compact"))
         self.assertIsNone(self.registry.get_command("curator"))

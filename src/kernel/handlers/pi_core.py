@@ -280,3 +280,42 @@ def changelog(arg: str, ctx: HandlerContext) -> str:
 def llama(arg: str, ctx: HandlerContext) -> str:
     from .subsystems import local
     return local(arg, ctx)
+
+
+@command("models")
+def models(arg: str, ctx: HandlerContext) -> str:
+    """List real models from a provider's API: /models [anthropic|openai|google|openrouter|groq|xai|deepseek|mistral]"""
+    import json as _json
+    import urllib.request
+    from ...providers.auth_plugin import load_providers
+    from ...providers.keyring import Keyring
+    kr, provs = Keyring(), load_providers()
+    want = arg.strip().lower()
+    if not want:
+        names = sorted({k["provider"] for k in kr.list_keys()})
+        return "Logged-in providers: " + (", ".join(names) or "none (use /login)") + "\nUsage: /models <provider>  then  /model <provider>/<id>"
+    keys = kr.get_active_unblocked_keys(want)
+    if not keys:
+        return f"[!] No key for '{want}'. Use /login first."
+    key = keys[0].get("api_key") or keys[0].get("key")
+    base = (provs.get(want, {}).get("base_url") or {"openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1",
+            "google": "https://generativelanguage.googleapis.com/v1beta"}.get(want))
+    if not base:
+        return f"[!] Don't know the models endpoint for '{want}'."
+    h = {"User-Agent": "omni"}
+    url = base + "/models"
+    if want == "anthropic":
+        h["anthropic-version"] = "2023-06-01"
+        h.update({"Authorization": f"Bearer {key}", "anthropic-beta": "oauth-2025-04-20"} if key.startswith("sk-ant-oat") else {"x-api-key": key})
+    elif want == "google":
+        url += f"?key={key}"
+    else:
+        h["Authorization"] = f"Bearer {key}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=20) as r:
+            data = _json.loads(r.read().decode())
+    except Exception as e:
+        return f"[!] {want} models request failed: {e}"
+    rows = data.get("data") or data.get("models") or []
+    ids = sorted((m.get("id") or m.get("name", "")).replace("models/", "") for m in rows)
+    return f"--- {want} models ({len(ids)}) ---\n" + "\n".join(f"  {want}/{i}" for i in ids[:60]) + "\nUse: /model <provider>/<id>"

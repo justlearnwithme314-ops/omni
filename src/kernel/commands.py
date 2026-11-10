@@ -202,6 +202,7 @@ CLI_SUBCOMMANDS: Dict[str, str] = {
 # All Slash Commands Catalog
 # ---------------------------------------------------------------------------
 ALL_SLASH_COMMANDS: List[Dict[str, Any]] = [
+    {"name": "models", "category": "pi", "description": "List real models from a logged-in provider", "usage": "/models <provider>"},
     {"name": "eval", "category": "omp", "description": "Harbor & SWE-bench Evaluator Harness with SQLite trace store", "usage": "/eval [task_id]"},
     {"name": "benchmark", "category": "omp", "description": "Benchmark trial executor across repository suites", "usage": "/benchmark [task_id]"},
     {"name": "sandbox", "category": "openclaw", "description": "Ephemeral Docker Sandbox isolation for untrusted commands", "usage": "/sandbox <cmd>"},

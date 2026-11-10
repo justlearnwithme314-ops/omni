@@ -626,12 +626,19 @@ class UnifiedLLMClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Anthropic Messages REST endpoint."""
-        url = f"{base_url.rstrip("/")}/v1/messages" if base_url else "https://api.anthropic.com/v1/messages"
+        root = (base_url or "https://api.anthropic.com").rstrip("/")
+        root = root[:-3] if root.endswith("/v1") else root  # endpoint config may already include /v1
+        url = f"{root}/v1/messages"
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
         }
+        oauth = api_key.startswith("sk-ant-oat")  # Claude Pro/Max subscription token
+        if oauth:
+            headers["Authorization"] = f"Bearer {api_key}"
+            headers["anthropic-beta"] = "oauth-2025-04-20"
+        else:
+            headers["x-api-key"] = api_key
         system_parts: list[str] = []
         anthropic_msgs: list[dict[str, Any]] = []
         for m in messages:
@@ -649,7 +656,17 @@ class UnifiedLLMClient:
                     }]
                 })
             elif role == "assistant":
-                anthropic_msgs.append({"role": "assistant", "content": [{"type": "text", "text": str(content)}]})
+                blocks: list[dict[str, Any]] = [{"type": "text", "text": str(content)}] if content else []
+                for tc in m.get("tool_calls") or []:
+                    fn = tc.get("function", tc)
+                    args = fn.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args or "{}")
+                        except ValueError:
+                            args = {}
+                    blocks.append({"type": "tool_use", "id": tc.get("id") or "call_0", "name": fn.get("name"), "input": args})
+                anthropic_msgs.append({"role": "assistant", "content": blocks or [{"type": "text", "text": "(no content)"}]})
             else:
                 anthropic_msgs.append({"role": "user", "content": [{"type": "text", "text": str(content)}]})
 
@@ -658,7 +675,10 @@ class UnifiedLLMClient:
             "messages": anthropic_msgs,
             "max_tokens": kwargs.get("max_tokens") or 4096,
         }
-        if system_parts:
+        if oauth:  # subscription tokens are only accepted when the system prompt starts with this identity
+            payload["system"] = [{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."}] + \
+                ([{"type": "text", "text": "\n\n".join(system_parts)}] if system_parts else [])
+        elif system_parts:
             payload["system"] = "\n\n".join(system_parts)
         if tools:
             payload["tools"] = normalize_tools_for_anthropic(tools)
