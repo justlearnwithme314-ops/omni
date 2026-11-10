@@ -2,18 +2,23 @@
   "version": "1.0.0",
   "active_mode": "autonomous",
   "features": {
-    "plugins_pi": true,
-    "plugins_hermes": true,
-    "plugins_openclaw": true,
-    "plugins_mcp": true,
-    "self_evolution": false,
     "context_compaction": true,
-    "auth_gateway": true,
-    "speculative_execution": false,
-    "openclaw_skills": true,
-    "hermes_plugins": true,
+    "speculative_execution": true,
+    "internal_urls": true,
+    "subagents": true,
     "pi_extensions": true,
-    "mcp_servers": true
+    "hermes_tool_calling": true,
+    "prefix_caching": true,
+    "lifecycle_hooks": true,
+    "auxiliary_client": true,
+    "self_evolution": false,
+    "hermes_plugins": true,
+    "openclaw_skills": true,
+    "permission_gates": true,
+    "session_persistence": true,
+    "multi_channel_gateway": false,
+    "mcp_servers": true,
+    "auth_gateway": true
   },
   "model_tiers": {
     "fast": [

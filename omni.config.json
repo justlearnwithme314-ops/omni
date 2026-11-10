@@ -18,6 +18,6 @@
     "mcp_servers": true,
     "auth_gateway": true
   },
-  "command_profile": "openclaw",
+  "command_profile": "full",
   "active_skin": "catppuccin"
 }

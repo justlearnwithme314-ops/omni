@@ -9,6 +9,10 @@ import os
 import sys
 from typing import Optional
 
+if __name__ == "__main__":  # route the Pi profile before importing the rest of Omni (keeps `omni pi` lean)
+    from .pi.launcher import maybe_launch_pi
+    maybe_launch_pi()
+
 from .kernel.config import HarnessConfig
 from .kernel.events import EventBus
 from .kernel.state import SessionState
@@ -342,6 +346,8 @@ def cmd_evolve(args):
 
 
 def main():
+    from .pi.launcher import maybe_launch_pi
+    maybe_launch_pi()  # `omni pi ...`, `--profile pi`, or saved profile "pi" -> Pi runtime (exits)
     parser = argparse.ArgumentParser(description="Omni: Universal Agentic AI System")
     subparsers = parser.add_subparsers(dest="command")
 

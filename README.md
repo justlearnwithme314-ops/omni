@@ -50,6 +50,39 @@ Switch profiles with one command or toggle any of the 16 modular features indivi
 
 ---
 
+## Omni core and profiles (new)
+
+`omni` now runs on a Pi-compatible core with a full-screen terminal window. Pi is the lightest **profile**; heavier
+profiles add Omni's other capabilities on top of the same core and window:
+
+| Profile | Adds |
+|---|---|
+| `pi` | Pi exactly: read/bash/edit/write, Pi extensions (real ones, via a Node host), skills, prompt templates, JSONL sessions |
+| `lean` | grep, find, ls |
+| `balanced` | MCP servers, Hermes plugins, Omni tools (browser, LSP, canvas, remote nodes), permission gate |
+| `autonomous` / `full` | + OpenClaw skills, autonomous-work prompt |
+| `evolve` | autonomous + self-evolution bookkeeping |
+
+```text
+omni                      open the window with the active profile
+omni profile [name]       list / set the active profile        (/profile inside the window)
+omni --profile lean ...   one run with another profile
+omni pi ...               the pi profile
+omni run "prompt"         one-shot answer
+omni install npm:<pkg>    Pi packages (also git:/local; remove / update / list)
+omni mcp add <name> ...   MCP servers (remove / list / login / logout; /mcp inside the window)
+omni legacy               the previous REPL; subcommands like `omni models` still use the previous CLI
+```
+
+Profiles are JSON files in `profiles/` (plus `~/.omni/profiles/`) and can `extends` each other. Set `"mcp": false` in a
+profile to keep MCP servers off for it.
+
+Pi features in every profile: MCP servers (`~/.pi/agent/mcp.json`), `codemode` and `tool_search`, Pi packages,
+image resizing and inline images (kitty / iTerm2 protocols), `"tuiMode": "regular"` for a non-fullscreen window,
+parallel read-only tools, `/share` via Radius or a gist, and the extension UI hooks (custom editors, autocomplete
+providers, terminal input, markdown transformers, virtual models, TSX extensions).
+Details: [docs/PI_PROFILE.md](docs/PI_PROFILE.md) · roadmap: [docs/INTEGRATION_PLAN.md](docs/INTEGRATION_PLAN.md).
+
 ## Quickstart
 
 ### Installation

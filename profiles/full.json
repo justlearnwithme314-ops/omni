@@ -1,0 +1,6 @@
+{
+  "name": "full",
+  "extends": "autonomous",
+  "description": "Alias of autonomous; grows as OMP, Hermes and OpenClaw capabilities land (see docs/INTEGRATION_PLAN.md).",
+  "accent": "#ff79c6"
+}
