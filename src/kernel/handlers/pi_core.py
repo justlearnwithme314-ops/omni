@@ -210,6 +210,10 @@ def login(arg: str, ctx: HandlerContext) -> str:
     parts = arg.split()
     if not parts:
         return "--- Providers (/login <provider> [api-key]) ---\n" + "\n".join(ap.status())
+    if parts and parts[0] == "import":
+        from ...providers.oauth import OAuthManager
+        got = OAuthManager(ap.kr).import_from_omp()
+        return f"[✓] Imported {len(got)} login(s) from Oh My Pi: " + ", ".join(sorted({str(k.get('provider')) for k in got}))
     try:
         return "[✓] " + ap.login(parts[0].lower(), parts[1] if len(parts) > 1 else None)
     except LoginError as e:

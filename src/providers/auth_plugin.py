@@ -55,13 +55,13 @@ def _save_token(pid: str, data: dict) -> None:
 
 
 def pkce_pair() -> tuple:
-    verifier = secrets.token_urlsafe(64)
+    verifier = base64.urlsafe_b64encode(secrets.token_bytes(96)).rstrip(b"=").decode()
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
     return verifier, challenge
 
 
 def build_authorize_url(p: dict, redirect_uri: str, challenge: str, state: str) -> str:
-    q = {"response_type": "code", "client_id": p["client_id"], "redirect_uri": redirect_uri, "scope": p.get("scopes", ""),
+    q = {"client_id": p["client_id"], "response_type": "code", "redirect_uri": redirect_uri, "scope": p.get("scopes", ""),
          "code_challenge": challenge, "code_challenge_method": "S256", "state": state, **p.get("extra_params", {})}
     return p["authorize_url"] + "?" + urllib.parse.urlencode(q)
 
@@ -176,7 +176,7 @@ class AuthPlugin:
 
     def _pkce(self, pid, p):
         verifier, challenge = pkce_pair()
-        state = secrets.token_urlsafe(16)
+        state = secrets.token_hex(16)
         manual = p.get("manual_code")
         redirect = p.get("redirect_uri") or f"http://localhost:{p['redirect_port']}{p.get('redirect_path', '/callback')}"
         url = build_authorize_url(p, redirect, challenge, state)
