@@ -1,8 +1,20 @@
 {
   "name": "balanced",
   "extends": "lean",
-  "description": "Everyday work: Pi core + MCP servers, Hermes plugins, Omni tools (browser, LSP), and a permission gate for destructive actions.",
+  "description": "Everyday work: lean + todo, ask, fetch, MCP servers, Hermes plugins, Omni tools, and a permission gate.",
   "accent": "#9ece6a",
-  "omni_registry": { "enabled": true, "sources": ["mcp", "hermes", "omni"] },
+  "capabilities": [
+    "todo",
+    "ask",
+    "fetch"
+  ],
+  "omni_registry": {
+    "enabled": true,
+    "sources": [
+      "mcp",
+      "hermes",
+      "omni"
+    ]
+  },
   "permission_gate": true
 }

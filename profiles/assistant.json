@@ -1,0 +1,16 @@
+{
+  "name": "assistant",
+  "extends": "lean",
+  "description": "Long-lived assistant: persistent memory, self-written skills, shared skill library, todo, subagents, fetch.",
+  "accent": "#bb9af7",
+  "capabilities": [
+    "todo",
+    "memory",
+    "task",
+    "ask",
+    "fetch",
+    "skills-universal",
+    "skill-authoring"
+  ],
+  "skills_budget_chars": 8000
+}

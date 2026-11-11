@@ -1,6 +1,11 @@
 {
   "name": "full",
   "extends": "autonomous",
-  "description": "Alias of autonomous; grows as OMP, Hermes and OpenClaw capabilities land (see docs/INTEGRATION_PLAN.md).",
-  "accent": "#ff79c6"
+  "description": "Everything on: autonomous + skill authoring. Grows as more modules land (docs/INTEGRATION_PLAN.md).",
+  "accent": "#ff79c6",
+  "capabilities": [
+    "+skill-authoring",
+    "+plan",
+    "+ast"
+  ]
 }

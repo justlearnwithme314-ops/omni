@@ -1,0 +1,15 @@
+{
+  "name": "coder",
+  "extends": "lean",
+  "description": "Coding workhorse: todo, subagents, questions, fetch, context checkpoints, plan mode and AST search on top of lean.",
+  "accent": "#f7768e",
+  "capabilities": [
+    "todo",
+    "task",
+    "ask",
+    "fetch",
+    "checkpoint",
+    "plan",
+    "ast"
+  ]
+}

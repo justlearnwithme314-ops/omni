@@ -29,6 +29,20 @@ Rules every step below follows:
 
 ## 1. Baseline
 
+**Update (2026-11-11):** phase 2's capability registry exists (`src/pi/caps`, documented in `CAPABILITIES.md`):
+profiles list `capabilities`, the user toggles them with `/capabilities` / `omni toggle` (saved as an overlay),
+custom profiles are saved with `/profile save`, and every module reports its context cost. Profiles were renamed to
+neutral names (`core`, `lean`, `coder`, `assistant`, `balanced`, `autonomous`, `full`; `pi` / `omp` / `hermes` /
+`openclaw` remain as aliases). First native modules: `todo`, `ask`, `fetch`, `memory` (Hermes file format), `task`
+(subagents), `skills-universal` (other harnesses' skill folders + OpenClaw/Hermes gating), `skill-authoring`.
+Still open from phase 2: `ExecutionBackend` / `Scheduler` / `Channel` registries and `/doctor`.
+
+**Update (2026-11-11, later):** phase 3 started. Capabilities gained a tool `gate` and a `live_prompt` (the
+`ToolMiddleware` point in its first form). Oh My Pi ports: `checkpoint` / `rewind`, plan mode (`/plan`,
+`exit_plan_mode`), `ast_grep` / `ast_edit` through the ast-grep CLI, and hashline `read` / `edit` (opt-in).
+Open in phase 3: hashline block ops, `lsp`, `web_search`, `github`, `eval`, model roles, TTSR, snapcompact,
+the command list and the extension API delta.
+
 **Update (2026-11-10, later):** phase 2's profile part and phase 6's "point every profile at the new kernel" are done
 in a first form: `profiles/*.json` (`pi → lean → balanced → autonomous/full → evolve`), bare `omni` runs the core with
 the active profile, Omni's MasterToolRegistry (MCP, Hermes, OpenClaw, Omni tools) is bridged in as core tools for

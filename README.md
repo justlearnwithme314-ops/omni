@@ -50,32 +50,41 @@ Switch profiles with one command or toggle any of the 16 modular features indivi
 
 ---
 
-## Omni core and profiles (new)
+## Omni core, profiles and capabilities
 
-`omni` now runs on a Pi-compatible core with a full-screen terminal window. Pi is the lightest **profile**; heavier
-profiles add Omni's other capabilities on top of the same core and window:
+`omni` runs on a Pi-compatible core with a full-screen terminal window. A **profile** decides how much loads on top
+of it, from the barebones `core` (about 1,000 tokens of prompt and tool schemas) to `full`:
 
-| Profile | Adds |
-|---|---|
-| `pi` | Pi exactly: read/bash/edit/write, Pi extensions (real ones, via a Node host), skills, prompt templates, JSONL sessions |
-| `lean` | grep, find, ls |
-| `balanced` | MCP servers, Hermes plugins, Omni tools (browser, LSP, canvas, remote nodes), permission gate |
-| `autonomous` / `full` | + OpenClaw skills, autonomous-work prompt |
-| `evolve` | autonomous + self-evolution bookkeeping |
+| Profile | Adds | Alias |
+|---|---|---|
+| `core` | read/bash/edit/write, extensions (real Pi / Oh My Pi ones, via a Node host), skills, prompt templates, JSONL sessions | `pi` |
+| `lean` | grep, find, ls | |
+| `coder` | todo list, subagents (`task`), clarifying questions (`ask`), web `fetch`, context checkpoints, plan mode (`/plan`), AST search | `omp` |
+| `assistant` | persistent memory, self-written skills, skills shared with other harnesses, todo, subagents, fetch | `hermes` |
+| `balanced` | todo, ask, fetch, MCP registry, Hermes plugins, Omni tools (browser, LSP), permission gate | |
+| `autonomous` | + subagents, memory, shared skills, OpenClaw plugins, autonomous-work prompt | `openclaw` |
+| `full` | everything | |
+
+Each addition is a **capability** you can switch on or off independently, and every one reports what it costs in
+context tokens:
 
 ```text
-omni                      open the window with the active profile
-omni profile [name]       list / set the active profile        (/profile inside the window)
-omni --profile lean ...   one run with another profile
-omni pi ...               the pi profile
-omni run "prompt"         one-shot answer
-omni install npm:<pkg>    Pi packages (also git:/local; remove / update / list)
-omni mcp add <name> ...   MCP servers (remove / list / login / logout; /mcp inside the window)
-omni legacy               the previous REPL; subcommands like `omni models` still use the previous CLI
+omni                          open the window with the active profile
+omni profile [name]           list / set the active profile            (/profile inside the window)
+omni --profile lean ...       one run with another profile
+omni capabilities             list modules and host switches           (/capabilities inside the window)
+omni toggle memory on         switch one module, for every profile
+omni --capabilities todo,ask  exact module list for one run
+omni run "prompt"             one-shot answer
+omni install npm:<pkg>        Pi packages (also git:/local; remove / update / list)
+omni mcp add <name> ...       MCP servers (remove / list / login / logout; /mcp inside the window)
+omni login <provider>         subscription sign-in: anthropic, google-antigravity, openai-codex, github-copilot
+omni legacy                   the previous REPL; subcommands like `omni models` still use the previous CLI
 ```
 
-Profiles are JSON files in `profiles/` (plus `~/.omni/profiles/`) and can `extends` each other. Set `"mcp": false` in a
-profile to keep MCP servers off for it.
+`/profile save <name>` stores your current setup as a custom profile in `~/.omni/profiles/`. Profiles are JSON
+files that `extends` each other; see [docs/CAPABILITIES.md](docs/CAPABILITIES.md) for the format, the module list,
+measured context costs, and what is and is not yet covered from Pi, Oh My Pi, Hermes and OpenClaw.
 
 Pi features in every profile: MCP servers (`~/.pi/agent/mcp.json`), `codemode` and `tool_search`, Pi packages,
 image resizing and inline images (kitty / iTerm2 protocols), `"tuiMode": "regular"` for a non-fullscreen window,

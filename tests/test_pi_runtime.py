@@ -218,11 +218,13 @@ class TestProfiles(PiTestCase):
     def test_profiles_resolve_through_extends(self):
         from src.pi.profiles import list_profiles, load_profile
         names = [p["name"] for p in list_profiles()]
-        self.assertEqual(names[:4], ["pi", "lean", "balanced", "autonomous"])
+        self.assertEqual(names[:5], ["core", "lean", "coder", "assistant", "balanced"])
         bal = load_profile("balanced")
         self.assertTrue(bal["permission_gate"] and bal["omni_registry"]["enabled"])
         self.assertEqual(bal["tools"], "read,bash,edit,write,grep,find,ls")  # inherited from lean
-        self.assertEqual(load_profile("nonsense")["name"], "pi")
+        self.assertEqual(load_profile("nonsense")["name"], "core")
+        self.assertEqual([load_profile(a)["name"] for a in ("pi", "omp", "hermes", "openclaw")],
+                         ["core", "coder", "assistant", "autonomous"])
 
     def test_profile_changes_tools_and_gate(self):
         s = self.session(profile="lean")

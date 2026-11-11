@@ -230,6 +230,11 @@ def tool_summary(name: str, args: Dict[str, Any], cwd: str) -> str:
             start = int(a.get("offset") or 1)
             rng = f":{start}" + (f"-{start + int(a['limit']) - 1}" if a.get("limit") else "")
         return _short(str(a.get("path", "")), cwd) + rng
+    if name == "edit" and isinstance(a.get("input"), str):  # hashline patch: show the files it names
+        import re as _re
+        heads = _re.findall(r"^\[(.+?)(?:#\w+)?\]\s*$", a["input"], _re.M)
+        ops = len(_re.findall(r"^(?:PUT|CUT|REM|MV)\b", a["input"], _re.M))
+        return ", ".join(_short(h, cwd) for h in heads[:3]) + f"  ({ops} op{'s' if ops != 1 else ''})"
     if name in ("write", "edit"):
         extra = f"  ({len(a.get('edits') or [])} edit{'s' if len(a.get('edits') or []) != 1 else ''})" if name == "edit" else (
             f"  ({str(a.get('content', '')).count(chr(10)) + 1} lines)" if name == "write" else "")

@@ -1,8 +1,23 @@
 {
   "name": "autonomous",
   "extends": "balanced",
-  "description": "Everything that exists today: MCP, Hermes, OpenClaw, Omni tools, remote nodes and canvas, with the permission gate on.",
+  "description": "Hands-off multi-step work: balanced + subagents, memory, shared skills, OpenClaw plugins.",
   "accent": "#c792ea",
-  "omni_registry": { "enabled": true, "sources": ["mcp", "hermes", "openclaw", "omni"] },
+  "capabilities": [
+    "+task",
+    "+memory",
+    "+skills-universal",
+    "+checkpoint"
+  ],
+  "skills_budget_chars": 8000,
+  "omni_registry": {
+    "enabled": true,
+    "sources": [
+      "mcp",
+      "hermes",
+      "openclaw",
+      "omni"
+    ]
+  },
   "prompt_append": "Work autonomously: plan, execute and verify multi-step tasks without waiting for confirmation unless an action is destructive."
 }

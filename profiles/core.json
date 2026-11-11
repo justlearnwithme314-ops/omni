@@ -1,0 +1,14 @@
+{
+  "name": "core",
+  "description": "Barebones: 4 core tools, extensions, skills and templates. Nothing else loads.",
+  "accent": "#7aa2ff",
+  "tools": "read,bash,edit,write",
+  "pi_extensions": true,
+  "omni_plugins_pi": true,
+  "omni_registry": {
+    "enabled": false
+  },
+  "permission_gate": false,
+  "capabilities": [],
+  "prompt_append": ""
+}

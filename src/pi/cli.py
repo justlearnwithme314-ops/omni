@@ -48,7 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
     a("-na", "--no-approve", action="store_true", help="ignore trust-gated project files")
     a("--no-mcp", action="store_true", help="do not connect MCP servers")
     a("--no-omni-plugins", action="store_true", help="do not load extensions from Omni's plugins/pi folder")
-    a("--profile", help="profile from profiles/*.json (pi, lean, balanced, autonomous, full, evolve)")
+    a("--profile", help="profile from profiles/*.json or ~/.omni/profiles (core, lean, coder, assistant, balanced, "
+                        "autonomous, full; aliases: pi, omp, hermes, openclaw)")
+    a("--capabilities", help="exact module list for this run, e.g. todo,ask,fetch ('' = none); overrides the profile")
     a("--list-profiles", action="store_true")
     a("-v", "--version", action="store_true")
     return p
@@ -69,7 +71,8 @@ def options_from_args(args: argparse.Namespace) -> SessionOptions:
         no_prompt_templates=args.no_prompt_templates, no_context_files=args.no_context_files, system_prompt=args.system_prompt,
         append_system_prompt=args.append_system_prompt, approve=approve,
         mode="rpc" if args.mode == "rpc" else "json" if args.mode == "json" else "print" if args.print else "interactive",
-        omni_plugin_dir=plugin_dir, profile=args.profile, no_mcp=args.no_mcp)
+        omni_plugin_dir=plugin_dir, profile=args.profile, no_mcp=args.no_mcp,
+        capabilities=None if args.capabilities is None else [c.strip() for c in args.capabilities.split(",") if c.strip()])
     return o
 
 
