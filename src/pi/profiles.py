@@ -1,13 +1,20 @@
 """Profiles as data: `profiles/<name>.json` (+ `~/.omni/profiles/`), resolved through `extends`.
 
-A profile says which capabilities the core loads, from barebones `pi` up to `full`:
-    tools            Pi tool list spec ("read,bash,edit,write", "+grep", ...)
-    pi_extensions    load Pi/OMP extensions through the Node host
-    omni_plugins_pi  also load extensions from Omni's plugins/pi folder
-    omni_registry    {"enabled": bool, "sources": [mcp, hermes, openclaw, omni]} - Omni's legacy tool registry
-    permission_gate  confirm destructive tool calls (Omni PermissionGate)
-    prompt_append    extra system prompt text
+A profile says which parts of the harness load, from the barebones `core` up to `full`:
+    tools              tool list spec ("read,bash,edit,write", "+grep", ...)
+    capabilities       native modules to switch on (see `src/pi/caps`): ["todo", "ask"] replaces the inherited list,
+                       ["+memory", "-ask"] edits it
+    pi_extensions      load Pi / Oh My Pi extensions through the Node host
+    omni_plugins_pi    also load extensions from Omni's plugins/pi folder
+    omni_registry      {"enabled": bool, "sources": [mcp, hermes, openclaw, omni]} - Omni's plugin registry
+    permission_gate    confirm destructive tool calls
+    mcp                false = do not start MCP servers
+    skills_budget_chars  cap on the skills listing in the prompt (descriptions are shortened to fit)
+    prompt_append      extra system prompt text
     accent / description  UI chrome
+
+Built-in profiles are named for what they are; the names of the harnesses that inspired them still work as aliases
+(`pi` -> core, `omp` -> coder, `hermes` -> assistant, `openclaw` -> autonomous).
 """
 from __future__ import annotations
 
@@ -17,14 +24,27 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PROFILE = "pi"
+DEFAULT_PROFILE = "core"
 
 BUILTIN: Dict[str, Dict[str, Any]] = {
-    "pi": {"name": "pi", "description": "Barebones Pi.", "accent": "#7aa2ff", "tools": "read,bash,edit,write",
-           "pi_extensions": True, "omni_plugins_pi": True, "omni_registry": {"enabled": False}, "permission_gate": False,
-           "prompt_append": ""},
+    "core": {"name": "core", "description": "Barebones core.", "accent": "#7aa2ff", "tools": "read,bash,edit,write",
+             "pi_extensions": True, "omni_plugins_pi": True, "omni_registry": {"enabled": False}, "permission_gate": False,
+             "capabilities": [], "prompt_append": ""},
 }
-ALIASES = {"default": "pi", "minimal": "pi", "barebones": "pi", "omp": "lean"}
+ALIASES = {"default": "core", "minimal": "core", "barebones": "core", "pi": "core", "omp": "coder", "ohmypi": "coder",
+           "hermes": "assistant", "openclaw": "autonomous"}
+ORDER = ["core", "lean", "coder", "assistant", "balanced", "autonomous", "full", "evolve"]
+
+
+def canonical(name: Optional[str]) -> str:
+    n = (name or DEFAULT_PROFILE).lower()
+    return ALIASES.get(n, n)
+
+
+def user_profiles_dir() -> Path:
+    """Where `/profile save` writes: `OMNI_PROFILES_DIR` when set, else `~/.omni/profiles`."""
+    extra = os.environ.get("OMNI_PROFILES_DIR")
+    return Path(extra) if extra else Path.home() / ".omni" / "profiles"
 
 
 def profile_dirs() -> List[Path]:
@@ -69,9 +89,14 @@ def load_profile(name: Optional[str]) -> Dict[str, Any]:
     if not chain:
         chain = [BUILTIN[DEFAULT_PROFILE]]
         name = DEFAULT_PROFILE
+    from .caps import merge_capability_lists
     prof: Dict[str, Any] = {}
+    caps: List[str] = []
     for c in chain:
-        prof = _merge(prof, {k: v for k, v in c.items() if k != "extends"})
+        prof = _merge(prof, {k: v for k, v in c.items() if k not in ("extends", "capabilities")})
+        if isinstance(c.get("capabilities"), list):
+            caps = merge_capability_lists(caps, [str(x) for x in c["capabilities"]])
+    prof["capabilities"] = caps
     prof["name"] = name
     return prof
 
@@ -81,8 +106,25 @@ def list_profiles() -> List[Dict[str, Any]]:
     for d in profile_dirs():
         if d.is_dir():
             names.update(p.stem for p in d.glob("*.json"))
-    order = ["pi", "lean", "balanced", "autonomous", "full", "evolve"]
-    return [load_profile(n) for n in sorted(names, key=lambda n: (order.index(n) if n in order else 99, n))]
+    return [load_profile(n) for n in sorted(names, key=lambda n: (ORDER.index(n) if n in ORDER else 99, n))]
+
+
+def save_profile(name: str, extends: str, capabilities: List[str], description: str = "",
+                 extra: Optional[Dict[str, Any]] = None) -> Path:
+    """Write a custom profile (`/profile save <name>`): the parent profile plus an exact capability list."""
+    import re
+    name = name.strip().lower()
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{0,31}$", name):
+        raise ValueError("profile names use lowercase letters, numbers, - and _ (max 32)")
+    if name in ALIASES or (PROJECT_ROOT / "profiles" / f"{name}.json").is_file() or name in BUILTIN:
+        raise ValueError(f"'{name}' is a built-in profile name; pick another")
+    d = user_profiles_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    data = {"name": name, "extends": extends, "description": description or f"Custom profile based on {extends}.",
+            "capabilities": list(capabilities), **(extra or {})}
+    path = d / f"{name}.json"
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return path
 
 
 def _config_path() -> Path:

@@ -175,6 +175,7 @@ class SessionOptions:
     agent_dir: Optional[str] = None
     profile: Optional[str] = None           # profiles/<name>.json; None -> "pi"
     no_mcp: bool = False                    # --no-mcp
+    capabilities: Optional[List[str]] = None  # explicit capability list (overrides the profile and the user overlay)
 
 
 class AgentSession:
@@ -184,8 +185,12 @@ class AgentSession:
         self.agent_dir = Path(opts.agent_dir) if opts.agent_dir else res.agent_dir()
         self.agent_dir.mkdir(parents=True, exist_ok=True)
         self.ui = ui  # object implementing ui.* methods used by extensions (select/confirm/input/notify/...)
-        from .profiles import load_profile
-        self.profile: Dict[str, Any] = load_profile(opts.profile)
+        from .caps import CapabilityManager
+        self._no_extensions_flag = opts.no_extensions  # the user's own -ne, kept apart from what a profile decides
+        self.base_profile: Dict[str, Any] = {}
+        self.profile: Dict[str, Any] = {}
+        self._resolve_profile(opts.profile)
+        self.caps = CapabilityManager(self)
         if not self.profile.get("pi_extensions", True):
             opts.no_extensions = True
         if not self.profile.get("omni_plugins_pi", True):
@@ -267,7 +272,18 @@ class AgentSession:
         self.emit("session_start", {"reason": "startup"})
         self.emit("resources_discover", {"reason": "startup"})
 
+    def _resolve_profile(self, name: Optional[str]) -> None:
+        """Profile file (through `extends`) + the user's capability overlay; `--capabilities` replaces both."""
+        from .caps import effective_profile
+        from .profiles import load_profile
+        self.base_profile = load_profile(name)
+        explicit = self.opts.capabilities
+        self.profile = effective_profile(self.base_profile, self.agent_dir, use_overlay=explicit is None)
+        if explicit is not None:
+            self.profile["capabilities"] = list(explicit)
+
     def _load_profile_capabilities(self) -> None:
+        self.caps.load()
         reg = self.profile.get("omni_registry") or {}
         self.omni_tools = {}
         if reg.get("enabled") and not self.opts.no_tools:
@@ -305,9 +321,11 @@ class AgentSession:
             diag.append(f"themes: {e}")
         self.shadowed_skills: List[res.Skill] = []
         self.shadowed_templates: List[res.PromptTemplate] = []
+        cap_roots = [str(p) for p in self.caps.skill_roots()]  # other harnesses' skill folders (skills-universal)
         self.skills = [] if self.opts.no_skills else res.discover_skills(self.cwd, self.agent_dir, self.trusted,
-                                                                         list(self.settings.get("skills") or []) + pkg_skills + self.opts.skills, diag,
+                                                                         list(self.settings.get("skills") or []) + pkg_skills + self.opts.skills + cap_roots, diag,
                                                                          self.shadowed_skills)
+        self.skills = self.caps.filter_skills(self.skills, diag)
         if self.opts.no_skills and self.opts.skills:
             self.skills = res.discover_skills(self.cwd, Path("/nonexistent"), False, self.opts.skills, diag)
         self.templates = [] if self.opts.no_prompt_templates else res.discover_templates(
@@ -430,10 +448,13 @@ class AgentSession:
         elif o.no_builtin_tools:
             names = []
         else:
-            profile_tools = self.profile.get("tools") if self.profile.get("name") != "pi" else None
+            profile_tools = self.profile.get("tools") if self.profile.get("name") != "core" else None
             names = resolve_tool_list(o.tools or profile_tools or self.settings.get("defaultTools"), DEFAULT_TOOLS)
             names = [n for n in names if n not in o.exclude_tools]
         if not o.no_tools:
+            for name in self.caps.tools:
+                if name not in names and name not in o.exclude_tools:
+                    names.append(name)
             for name in self.omni_tools:
                 if name not in names and name not in o.exclude_tools:
                     names.append(name)
@@ -473,6 +494,7 @@ class AgentSession:
     # ================================================================================== tools
     def all_tools(self) -> Dict[str, ToolDef]:
         tools = dict(self.builtin_tools)
+        tools.update(self.caps.tools)
         tools.update(self.omni_tools)
         if self.mcp is not None:
             tools.update({n: v[0] for n, v in self.mcp.tool_defs().items()})
@@ -550,13 +572,20 @@ class AgentSession:
             sec = self.mcp.prompt_section()
             if sec:
                 append = (append + "\n\n" if append else "") + sec
+        sec = self.caps.prompt_section()
+        if sec:
+            append = (append + "\n\n" if append else "") + sec
+        skills = self.skills
+        if self.profile.get("skills_budget_chars"):  # keep a large shared skill library inside a context budget
+            from .caps.skills import fit_skills
+            skills = fit_skills(skills, int(self.profile["skills_budget_chars"]))
         tools = self.active_tools()
         return PromptOptions(
             cwd=self.cwd, custom_prompt=custom, selected_tools=[t.name for t in tools],
             tool_snippets={t.name: t.prompt_snippet for t in tools if t.prompt_snippet},
             tool_guidelines={t.name: list(t.prompt_guidelines) for t in tools if t.prompt_guidelines},
             prompt_guidelines=list(self.extra_prompt_guidelines), append_system_prompt=append,
-            context_files=self.context_files, skills=self.skills)
+            context_files=self.context_files, skills=skills)
 
     def system_prompt(self) -> str:
         if self.forced_system_prompt is not None:
@@ -1017,7 +1046,10 @@ class AgentSession:
                     call["name"], "\n".join(f"- {k}: missing" for k in missing))}], "isError": True, "details": None}
             else:
                 r = None
-                if self.gate is not None:
+                why = self.caps.gate(call["name"], args)  # capability gates (e.g. plan mode is read-only)
+                if why:
+                    r = {"block": True, "reason": why}
+                if r is None and self.gate is not None:
                     ok, why = self.gate.check(call["name"], args)
                     if not ok:
                         r = {"block": True, "reason": why}
@@ -1383,8 +1415,7 @@ class AgentSession:
 
     def switch_profile(self, name: str) -> None:
         """Apply another profile in place (tools, hosts, gate, prompt) and reload resources."""
-        from .profiles import load_profile
-        self.profile = load_profile(name)
+        self._resolve_profile(name)
         self.opts.profile = self.profile["name"]
         self.opts.tools = None
         self.opts.no_extensions = not self.profile.get("pi_extensions", True)
@@ -1405,6 +1436,8 @@ class AgentSession:
         self.ext = NullHost()
         self.settings.reload()
         self.registry.reload()
+        self._resolve_profile(self.opts.profile)  # picks up capability toggles
+        self.opts.no_extensions = self._no_extensions_flag or not self.profile.get("pi_extensions", True)
         self.load_resources()
         if not self.opts.no_extensions:
             self._start_extensions()

@@ -74,11 +74,48 @@ def profile_command(argv: List[str]) -> bool:
             print(f"  {mark} {name:<11} {p.get('description', '')}")
         print("\n  omni profile <name>   switch      ·   omni --profile <name>   one run only\n")
         return True
-    name = argv[1].lower()
+    from .profiles import canonical
+    name = canonical(argv[1])
     if name not in profiles:
         return False  # maybe a legacy command profile; let the old CLI handle it
     set_active_profile(name)
     print(f"  ✓ active profile: {name} — {profiles[name].get('description', '')}")
+    return True
+
+
+def capability_command(argv: List[str]) -> bool:
+    """`omni capabilities` (list) and `omni toggle <id> [on|off]`, without starting a session."""
+    if not argv or argv[0] not in ("capabilities", "caps", "toggle"):
+        return False
+    from . import resources as res
+    from .caps import effective_profile, load_builtin, read_overlay, write_overlay
+    from .profiles import active_profile_name, load_profile
+    agent = res.agent_dir()
+    caps = load_builtin()
+    base = load_profile(active_profile_name())
+    if argv[0] == "toggle":
+        if len(argv) < 2 or argv[1] not in caps or (len(argv) > 2 and argv[2] not in ("on", "off")):
+            print("usage: omni toggle <capability> [on|off]\n  capabilities: " + ", ".join(sorted(caps)))
+            return True
+        cap, eff = caps[argv[1]], effective_profile(base, agent)
+        plain = effective_profile(base, agent, use_overlay=False)
+        state = (lambda prof: cap.is_on(prof) if cap.is_on else cap.id in prof["capabilities"])
+        new = (argv[2] == "on") if len(argv) > 2 else not state(eff)
+        overlay = read_overlay(agent)
+        if new == state(plain):
+            overlay.pop(cap.id, None)
+        else:
+            overlay[cap.id] = new
+        write_overlay(agent, overlay)
+        print(f"  ✓ {cap.id}: {'on' if new else 'off'}  (applies to every profile; `omni toggle {cap.id}` flips it back)")
+        return True
+    eff = effective_profile(base, agent)
+    print(f"\n  Capabilities · profile {eff['name']}\n")
+    for cid, cap in sorted(caps.items(), key=lambda kv: (kv[1].group != "feature", kv[0])):
+        on = cap.is_on(eff) if cap.is_on else cid in eff["capabilities"]
+        mine = "  (your override)" if cid in eff["_overlay"] else ""
+        print(f"  {'●' if on else '○'} {cid:<19} {cap.description}{mine}")
+    print("\n  omni toggle <id> [on|off]   ·   in a session: /capabilities\n")
     return True
 
 
@@ -89,7 +126,7 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
     if os.environ.get("OMNI_LEGACY") == "1":
         return
     raw = sys.argv[1:] if argv is None else argv
-    if profile_command(raw):
+    if profile_command(raw) or capability_command(raw):
         sys.exit(0)
     from .subcommands import run as run_sub
     sub = raw[1:] if raw[:1] == ["pi"] else raw

@@ -53,7 +53,10 @@ OMNI_EXTRAS: List[Tuple[str, str, Optional[str]]] = [
     ("extensions", "Show loaded extensions, their tools/commands and compatibility gaps", None),
     ("debug", "Write session messages and rendered screen to omni-pi-debug.log", None),
     ("theme", "Switch colour theme", "<name>"),
-    ("profile", "Switch profile: pi (barebones) … full (everything)", "<name>"),
+    ("profile", "Switch profile: core (barebones) … full (everything); `save <name>` keeps the current setup", "<name>"),
+    ("plan", "Plan mode: read-only until you approve the model's plan (needs the `plan` capability)", "[on|off]"),
+    ("capabilities", "Turn modules on/off (todo, memory, subagents, hosts…) and see what each costs in context",
+     "<id> [on|off]"),
     ("commands", "Command sources: pick which extension/prompt/skill a duplicate /command runs, rename prefixes",
      "[list|conflicts|prefer <name> <prefix:name>|prefix <source> <new>|reset]"),
 ]
@@ -708,10 +711,25 @@ class Commands:
         self.port.show("extensions", lines)
 
     def cmd_profile(self, args: str) -> None:
-        from .profiles import list_profiles, set_active_profile
+        from .profiles import canonical, list_profiles, save_profile, set_active_profile
         profiles = list_profiles()
         names = [p["name"] for p in profiles]
-        name = args.strip().lower()
+        if args.strip().lower().startswith("save"):
+            new = args.strip()[4:].strip() or (self.port.input("Name for the new profile", placeholder="my-setup") or "").strip()
+            if not new:
+                return
+            s = self.s
+            switches = {k: s.profile[k] for k in ("pi_extensions", "omni_plugins_pi", "permission_gate", "mcp", "omni_registry")
+                        if k in s.profile and s.profile.get(k) != s.base_profile.get(k)}
+            try:
+                path = save_profile(new, s.base_profile["name"], list(s.profile.get("capabilities") or []),
+                                    f"Custom: {s.base_profile['name']} with {len(s.caps.enabled)} module(s).", switches)
+            except ValueError as e:
+                self.port.notify(str(e), "error")
+                return
+            self.port.notify(f"Saved profile '{new.lower()}' to {path}. Switch with /profile {new.lower()}.", "success")
+            return
+        name = canonical(args.strip()) if args.strip() else ""
         if not name:
             cur = self.s.profile.get("name")
             labels = [("● " if p["name"] == cur else "  ") + f"{p['name']:<11} {p.get('description', '')}" for p in profiles]
@@ -727,7 +745,67 @@ class Commands:
         self.s.switch_profile(name)
         set_active_profile(name)
         self.port.reset_transcript()
-        self.port.notify(f"Profile: {name} · {len(self.s.active_tool_names)} tools", "success")
+        self.port.notify(f"Profile: {name} · {len(self.s.active_tool_names)} tools · "
+                         f"{len(self.s.caps.enabled)} module(s): {', '.join(self.s.caps.enabled) or 'none'}", "success")
+
+    def cmd_capabilities(self, args: str) -> None:
+        """List / toggle capabilities. Toggles are saved as the user's overlay and apply to every profile."""
+        s = self.s
+        parts = args.split()
+        if parts:
+            cid = parts[0].lower()
+            want = {"on": True, "off": False}.get(parts[1].lower()) if len(parts) > 1 else None
+            if len(parts) > 1 and want is None:
+                self.port.notify("Usage: /capabilities <id> [on|off]", "error")
+                return
+            self._toggle_capability(cid, want)
+            return
+        while True:
+            rows = s.caps.rows()
+            total = sum(r["tokens"] for r in rows)
+            labels = []
+            for r in rows:
+                state = "[x]" if r["on"] else "[ ]"
+                cost = f"~{r['tokens']} tok" if r["tokens"] else ("" if r["group"] == "host" or not r["on"] else "0 tok")
+                note = f" · not loaded: {r['problem']}" if r["problem"] else ""
+                mine = " · your override" if r["overridden"] else ""
+                labels.append(f"{state} {r['id']:<19} {r['title']} — {r['description']}" +
+                              (f"  ({cost})" if cost else "") + mine + note)
+            labels.append("✓ done")
+            idx = self.port.select(f"Capabilities · profile {s.profile.get('name')} · modules add ~{total} tokens per request "
+                                   "(enter toggles)", labels)
+            if idx is None or idx >= len(rows):
+                return
+            self._toggle_capability(rows[idx]["id"], None)
+
+    def cmd_plan(self, args: str) -> None:
+        s = self.s
+        if not s.caps.is_enabled("plan"):
+            self.port.notify("Plan mode is a capability that is off in this profile. Turn it on with "
+                             "/capabilities plan on (or use the coder / full profile).", "warning")
+            return
+        from .caps import plan
+        arg = args.strip().lower()
+        if arg not in ("", "on", "off"):
+            self.port.notify("Usage: /plan [on|off]", "error")
+            return
+        on = (not plan.is_on(s)) if not arg else arg == "on"
+        plan.set_mode(s, on)
+        self.port.notify("Plan mode on: read-only until you approve a plan. Describe the task." if on else
+                         "Plan mode off: edits and commands are allowed again.", "success")
+
+    def _toggle_capability(self, cid: str, want: Optional[bool]) -> None:
+        s = self.s
+        try:
+            new = s.caps.toggle(cid, want)
+        except KeyError:
+            from .caps import load_builtin
+            self.port.notify(f"Unknown capability '{cid}'. Available: {', '.join(sorted(load_builtin()))}", "error")
+            return
+        s.reload()
+        why = s.caps.problems.get(cid)
+        self.port.notify(f"{cid}: {'on' if new else 'off'}" + (f" (not loaded: {why})" if why and new else "") +
+                         f" · {len(s.active_tool_names)} tools active", "warning" if why and new else "success")
 
     # ------------------------------------------------------------------------------- command sources
     def cmd_commands(self, args: str) -> None:
