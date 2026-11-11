@@ -6,13 +6,14 @@
   "capabilities": [
     "todo",
     "ask",
-    "fetch"
+    "fetch",
+    "web-search",
+    "hermes-plugins"
   ],
   "omni_registry": {
     "enabled": true,
     "sources": [
       "mcp",
-      "hermes",
       "omni"
     ]
   },

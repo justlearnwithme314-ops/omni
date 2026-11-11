@@ -158,11 +158,12 @@ class InteractiveApp:
     def run(self) -> int:
         s = self.session
         try:
-            s.start()
+            s.start(defer_hosts=True)
         except SystemExit as e:
             print(e)
             return 1
         s.subscribe(lambda ev: self.inbox.put(("agent", ev)))
+        threading.Thread(target=s.finish_start, name="omni-startup", daemon=True).start()
         self.reset_transcript()
         self.term.enter(alt_screen=not self.regular, mouse=not self.regular)
         self.term.set_title(self.title or f"omni · {s.profile.get('name', 'pi')} — {os.path.basename(s.cwd)}")
@@ -491,6 +492,8 @@ class InteractiveApp:
         s = self.session
         ext = s.ext
         exts = [e.get("name") + ("" if e.get("ok") else " ✗") for e in getattr(ext, "extensions", [])]
+        if getattr(s, "loading", False):
+            exts = ["loading…"]
         home = str(Path.home())
         cwd = s.cwd.replace(home, "~", 1) if s.cwd.startswith(home) else s.cwd
         return {
@@ -653,6 +656,10 @@ class InteractiveApp:
             self.blocks.append(NoticeBlock(f"extension {os.path.basename(str(ev.get('path')))} [{ev.get('event')}]: {err}", "warning"))
         elif t == "session_replaced":
             self.rebuild_transcript()
+        elif t == "startup_complete":
+            if not any(isinstance(b, (UserBlock, AssistantBlock)) for b in self.blocks):
+                self.rebuild_transcript()  # welcome block now lists extensions, tools and warnings
+            self.dirty = True
         elif t in ("tools_changed", "model_changed", "model_select", "thinking_level_select"):
             pass
 
@@ -1317,6 +1324,10 @@ class InteractiveApp:
         if self.working and self.working_visible:
             msg = self.working_message or ("working" + "." * (int(time.time() * 2) % 4))
             parts.append(fg(p["accent"]) + spinner_frame() + " " + RESET + fg(p["muted"]) + msg + RESET + fg(p["dim"]) + "  esc to interrupt" + RESET)
+        if getattr(self.session, "loading", False):
+            self.dirty = True  # keep the spinner moving until startup_complete arrives
+            parts.append(fg(p["accent"]) + spinner_frame() + " " + RESET + fg(p["muted"]) +
+                         "loading extensions and plugins — you can type already" + RESET)
         if self.retry_note:
             parts.append(fg(p["warning"]) + "↻ " + self.retry_note + RESET)
         st, fu = self.queue_counts

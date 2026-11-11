@@ -7,7 +7,7 @@
 // stdout is reserved for the protocol; console output from extensions goes to stderr (the host log).
 import { register } from "node:module";
 import { spawn } from "node:child_process";
-import { existsSync, statSync, writeSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeSync } from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -440,8 +440,15 @@ const findCommand = (id, name) => (id && commands.get(id)) || [...commands.value
 async function loadOne(p) {
   const origPath = p;
   const ext = { path: origPath, name: path.basename(path.dirname(p)) === "extensions" ? path.basename(p) : path.basename(path.dirname(p)), ok: false, error: null,
-    tools: new Set(), commands: new Set(), events: new Set(), missing: new Set() };
+    tools: new Set(), commands: new Set(), events: new Set(), missing: new Set(), loadMs: 0, handlerMs: {} };
+  const t0 = performance.now();
   if (/index\.(ts|js|mjs)$/.test(p) === false) ext.name = path.basename(p).replace(/\.(ts|js|mjs)$/, "");
+  if (/^(dist|src|lib|build|bundle|pi|extension|extensions|index)$/.test(ext.name)) {
+    // a build folder says nothing: use the name of the package that owns the file
+    for (let d = path.dirname(p), i = 0; i < 5; i++, d = path.dirname(d)) {
+      try { const n = JSON.parse(readFileSync(path.join(d, "package.json"), "utf8")).name; if (n) { ext.name = n; break; } } catch {}
+    }
+  }
   extensions.push(ext);
   current = ext;
   try {
@@ -461,9 +468,11 @@ async function loadOne(p) {
     if (m) ext.error = `missing dependency '${m[1]}' (run npm install in ${path.dirname(p)})`;
   } finally {
     current = null;
+    ext.loadMs = Math.round(performance.now() - t0);
   }
 }
-const extReport = () => extensions.map((e) => ({ path: e.path, name: e.name, ok: e.ok, error: e.error, tools: [...e.tools], commands: [...e.commands], events: [...e.events], missing: [...e.missing] }));
+const extReport = () => extensions.map((e) => ({ path: e.path, name: e.name, ok: e.ok, error: e.error, tools: [...e.tools], commands: [...e.commands], events: [...e.events], missing: [...e.missing],
+  loadMs: e.loadMs, handlerMs: Object.fromEntries(Object.entries(e.handlerMs).map(([k, v]) => [k, Math.round(v)])) }));
 
 // ---------------------------------------------------------------------------------------------- emit
 async function emit(event, payload) {
@@ -472,8 +481,10 @@ async function emit(event, payload) {
   const ev = payload || {};
   const ctx = makeContext();
   const run = async (h, e) => {
+    const t = performance.now();
     try { return await h.fn(e, ctx); }
     catch (err) { notify("extension_error", { path: h.ext.path, event, error: String(err?.stack || err) }); return undefined; }
+    finally { if (h.ext?.handlerMs) h.ext.handlerMs[event] = (h.ext.handlerMs[event] || 0) + (performance.now() - t); }
   };
   switch (event) {
     case "tool_call": {

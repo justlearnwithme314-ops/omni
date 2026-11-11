@@ -7,10 +7,15 @@ instead of tens of thousands.
 
 Subagents cannot spawn subagents, run without extensions or MCP, keep no session file, and inherit the parent's
 model, credentials, project trust and permission gate.
+
+Named agents: a markdown file with frontmatter (`name`, `description`, optional `tools`, `model`) whose body is the
+agent's system prompt - the format Claude Code and Oh My Pi use. They are read from `<agent-dir>/agents`, the
+project's `.omni/agents` and `.pi/agents` (trusted), and, with `skills-universal` on, `~/.claude/agents` and the
+project's `.claude/agents`. `task(agent="reviewer", prompt=...)` runs one.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..tools.base import ToolDef, ToolError, text_result
 from . import Capability
@@ -24,17 +29,70 @@ SUBAGENT_PROMPT = ("You are a subagent working on one delegated task. You have n
                    "parent agent sees.")
 
 
-def run_subagent(parent: Any, prompt: str, read_only: bool, signal: Any = None, on_update: Any = None) -> Dict[str, Any]:
+TOOL_ALIASES = {"glob": "find", "ls": "ls", "list": "ls", "shell": "bash", "terminal": "bash", "multiedit": "edit",
+                "notebookedit": "edit", "str_replace": "edit"}
+
+
+def discover_agents(session: Any) -> Dict[str, Dict[str, Any]]:
+    """name -> {description, tools, model, prompt, path}; earlier folders win."""
+    from pathlib import Path
+    from .. import resources as res
+    roots = [Path(session.agent_dir) / "agents"]
+    if session.trusted:
+        roots += [Path(session.cwd) / ".omni" / "agents", Path(session.cwd) / ".pi" / "agents"]
+    if "skills-universal" in (session.profile.get("capabilities") or []):
+        roots.append(Path.home() / ".claude" / "agents")
+        if session.trusted:
+            roots.append(Path(session.cwd) / ".claude" / "agents")
+    out: Dict[str, Dict[str, Any]] = {}
+    for r in roots:
+        if not r.is_dir():
+            continue
+        for f in sorted(r.glob("*.md")):
+            try:
+                fm, body = res.parse_frontmatter(f.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+            name = str(fm.get("name") or f.stem).strip().lower()
+            if not name or name in out or not body.strip():
+                continue
+            tools = fm.get("tools")
+            if isinstance(tools, str):
+                tools = [t.strip() for t in tools.split(",")]
+            mapped = []
+            for t in tools or []:
+                t = str(t).strip().lower()
+                t = TOOL_ALIASES.get(t, t)
+                if t in WORK_TOOLS and t not in mapped:
+                    mapped.append(t)
+            out[name] = {"description": str(fm.get("description") or "").strip(), "tools": mapped or None,
+                         "model": str(fm.get("model") or "").strip() or None, "prompt": body.strip(), "path": str(f)}
+    return out
+
+
+def run_subagent(parent: Any, prompt: str, read_only: bool, signal: Any = None, on_update: Any = None,
+                 agent: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     from ..agent import AgentSession, SessionOptions
     from ..ai.models import model_key
     from ..modes import HeadlessUI
     if parent.model is None:
         raise ToolError("no model selected")
+    tools = READ_ONLY_TOOLS if read_only else WORK_TOOLS
+    model, system = model_key(parent.model), SUBAGENT_PROMPT
+    if agent:
+        if agent.get("tools"):
+            tools = [t for t in agent["tools"] if not read_only or t in READ_ONLY_TOOLS] or READ_ONLY_TOOLS
+        wanted = agent.get("model")
+        if wanted and wanted != "inherit":
+            m = parent.registry.resolve(wanted)
+            if m and parent.auth.has_auth(m["provider"]):
+                model = model_key(m)
+        system = SUBAGENT_PROMPT + "\n\n" + agent["prompt"]
     opts = SessionOptions(
-        cwd=parent.cwd, model=model_key(parent.model), thinking=parent.thinking_level, mode="print",
-        tools=",".join(READ_ONLY_TOOLS if read_only else WORK_TOOLS), no_session=True, no_extensions=True, no_mcp=True,
+        cwd=parent.cwd, model=model, thinking=parent.thinking_level, mode="print",
+        tools=",".join(tools), no_session=True, no_extensions=True, no_mcp=True,
         no_prompt_templates=True, approve=parent.trusted, agent_dir=str(parent.agent_dir), profile="core",
-        capabilities=[], append_system_prompt=SUBAGENT_PROMPT)
+        capabilities=[], append_system_prompt=system)
     child = AgentSession(opts, ui=HeadlessUI())
     child.start()
     child.gate = parent.gate  # the parent's permission gate also guards the subagent
@@ -73,28 +131,40 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
         prompt = str(p.get("prompt") or "").strip()
         if not prompt:
             raise ToolError("prompt is required: a complete, self-contained description of the task")
-        r = run_subagent(session, prompt, bool(p.get("read_only")), signal, on_update)
+        agent = None
+        if p.get("agent"):
+            agents = discover_agents(session)
+            agent = agents.get(str(p["agent"]).strip().lower())
+            if agent is None:
+                raise ToolError(f"unknown agent '{p['agent']}'. Available: {', '.join(sorted(agents)) or '(none defined)'}")
+        r = run_subagent(session, prompt, bool(p.get("read_only")), signal, on_update, agent)
         text = r["text"] or "(the subagent finished without a written report)"
         if len(text) > MAX_REPORT_CHARS:
             text = text[:MAX_REPORT_CHARS] + f"\n\n[report truncated: {len(r['text']) - MAX_REPORT_CHARS} more characters]"
         return text_result(text, {"description": p.get("description"), "usage": r["usage"], "toolCalls": r["toolCalls"],
                                   "turns": r["turns"]})
 
+    agents = discover_agents(session)
+    listing = ""
+    if agents:
+        rows = [f"{n}: {a['description'][:90]}" if a["description"] else n for n, a in sorted(agents.items())]
+        listing = " Named agents (pass as `agent`): " + "; ".join(rows)[:700] + "."
     return {"task": ToolDef(
         name="task", label="Task",
         description="Delegate a self-contained task to a subagent with a fresh context and get back only its final "
                     "report. Use it for wide searches, investigations and independent subtasks whose intermediate "
                     "output you do not need. The subagent knows nothing about this conversation: put all context, "
-                    "paths and the expected output in `prompt`. Set read_only=true for pure research.",
+                    "paths and the expected output in `prompt`. Set read_only=true for pure research." + listing,
         parameters={"type": "object", "properties": {
             "description": {"type": "string", "description": "3-6 word label"},
-            "prompt": {"type": "string"}, "read_only": {"type": "boolean"}}, "required": ["prompt"]},
+            "prompt": {"type": "string"}, "read_only": {"type": "boolean"},
+            "agent": {"type": "string", "description": "name of a defined agent (optional)"}}, "required": ["prompt"]},
         execute=execute, prompt_snippet="Delegate a self-contained task to a subagent")}
 
 
 def _available(session: Any):
     return "subagents cannot spawn subagents" if getattr(session.opts, "capabilities", None) == [] and \
-        session.opts.append_system_prompt == SUBAGENT_PROMPT else None
+        str(session.opts.append_system_prompt or "").startswith(SUBAGENT_PROMPT) else None
 
 
 CAPABILITIES = [Capability("task", "Subagents", "Delegate work to a fresh-context subagent and receive only its report.",

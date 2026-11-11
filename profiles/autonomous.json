@@ -7,14 +7,15 @@
     "+task",
     "+memory",
     "+skills-universal",
-    "+checkpoint"
+    "+checkpoint",
+    "+session-search",
+    "+hermes-plugins"
   ],
   "skills_budget_chars": 8000,
   "omni_registry": {
     "enabled": true,
     "sources": [
       "mcp",
-      "hermes",
       "openclaw",
       "omni"
     ]

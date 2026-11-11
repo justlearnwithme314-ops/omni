@@ -50,10 +50,11 @@ BUILTIN: List[Tuple[str, str, Optional[str]]] = [
     ("quit", "Quit omni", None),
 ]
 OMNI_EXTRAS: List[Tuple[str, str, Optional[str]]] = [
-    ("extensions", "Show loaded extensions, their tools/commands and compatibility gaps", None),
+    ("extensions", "Show loaded extensions, their tools/commands and compatibility gaps; `slow` ranks them by time", "[slow]"),
     ("debug", "Write session messages and rendered screen to omni-pi-debug.log", None),
     ("theme", "Switch colour theme", "<name>"),
     ("profile", "Switch profile: core (barebones) … full (everything); `save <name>` keeps the current setup", "<name>"),
+    ("doctor", "Health check: sign-ins, modules, extensions, plugins, hooks, MCP, and what is slow", None),
     ("plan", "Plan mode: read-only until you approve the model's plan (needs the `plan` capability)", "[on|off]"),
     ("capabilities", "Turn modules on/off (todo, memory, subagents, hosts…) and see what each costs in context",
      "<id> [on|off]"),
@@ -197,7 +198,17 @@ class Commands:
     def run(self, name: str, args: str) -> bool:
         fn: Optional[Callable[[str], None]] = getattr(self, "cmd_" + name.replace("-", "_"), None)
         if fn is None:
-            return False
+            spec = self.s.caps.commands().get(name) if hasattr(self.s, "caps") else None
+            if spec is None:
+                return False
+            try:  # a command registered by a capability (e.g. a Hermes plugin's /command)
+                out = spec[1](args.strip())
+            except Exception as e:
+                self.port.notify(f"/{name} failed: {type(e).__name__}: {e}", "error")
+                return True
+            if out:
+                self.port.notify(str(out), "info")
+            return True
         fn(args.strip())
         return True
 
@@ -695,9 +706,24 @@ class Commands:
                                           "settings.json \"extensions\", -e <path>, and Omni's plugins/pi folder."] + self.s.diagnostics[-5:])
             return
         lines = []
+        if args.strip() in ("slow", "time", "timing"):
+            # where startup and per-turn time goes: load time plus the time spent in each extension's event handlers
+            rows = sorted(exts, key=lambda e: -(e.get("loadMs", 0) + sum((e.get("handlerMs") or {}).values())))
+            total_load = sum(e.get("loadMs", 0) for e in exts)
+            lines.append(f"{len(exts)} extensions · {total_load} ms to load · last background startup "
+                         f"{getattr(self.s, 'startup_seconds', 0.0):.1f} s")
+            lines.append("")
+            for e in rows[:25]:
+                hm = e.get("handlerMs") or {}
+                worst = ", ".join(f"{k} {v} ms" for k, v in sorted(hm.items(), key=lambda kv: -kv[1])[:3] if v >= 5)
+                lines.append(f"{e.get('loadMs', 0):>6} ms load   {e['name']}" + (f"   handlers: {worst}" if worst else ""))
+            lines += ["", "Handler time is paid on every matching event (session_start once, before_agent_start per message).",
+                      "Disable an extension you do not need in settings.json, or run with -ne for none."]
+            self.port.show("extensions", lines)
+            return
         for e in exts:
             status = "✓" if e.get("ok") else "✗"
-            lines.append(f"{status} {e['name']}  ({e['path']})")
+            lines.append(f"{status} {e['name']}  ({e['path']})" + (f"  · {e['loadMs']} ms" if e.get("loadMs", 0) >= 50 else ""))
             if e.get("error"):
                 lines.append(f"    error: {e['error']}")
             if e.get("tools"):
@@ -777,6 +803,85 @@ class Commands:
             if idx is None or idx >= len(rows):
                 return
             self._toggle_capability(rows[idx]["id"], None)
+
+    def doctor_lines(self) -> List[str]:
+        """One screen that answers "is everything loaded, and if not, why?"."""
+        s = self.s
+        ok, bad, warn = "✓", "✗", "!"
+        lines = [f"Profile {s.profile.get('name')} · model {model_key(s.model)} · thinking {s.thinking_level}",
+                 f"Working directory {s.cwd}" + ("" if s.trusted else "  (project not trusted: its extensions/skills/hooks are off)"), ""]
+        # sign-ins
+        providers = sorted({m["provider"] for m in s.registry.all() if m["provider"] != "faux"})
+        signed = [p for p in providers if s.auth.has_auth(p)]
+        lines.append(f"{ok if signed else bad} Sign-ins: {', '.join(signed) or 'none — run /login'}")
+        if s.auth.last_refresh_error:
+            lines.append(f"  {warn} last token refresh failed: {s.auth.last_refresh_error}")
+        if s.model and not s.auth.has_auth(s.model["provider"]):
+            lines.append(f"  {bad} the current model's provider ({s.model['provider']}) has no credentials: /login {s.model['provider']}")
+        # modules
+        rows = s.caps.rows()
+        on = [r for r in rows if r["on"] and r["group"] == "feature"]
+        total = sum(r["tokens"] for r in rows)
+        lines.append(f"{ok} Modules ({len(on)} on, ~{total} tokens per request): {', '.join(r['id'] for r in on) or 'none'}")
+        for cid, why in s.caps.problems.items():
+            lines.append(f"  {warn} {cid} not loaded: {why}")
+        # extension host
+        if s.opts.no_extensions:
+            lines.append(f"{ok} Extensions: off (-ne or the profile)")
+        else:
+            from .extensions.bridge import MIN_NODE, node_executable, node_version
+            node = node_executable()
+            ver = node_version(node) if node else None
+            if not node:
+                lines.append(f"{bad} Extensions: Node.js not found (install Node >= {'.'.join(map(str, MIN_NODE))})")
+            elif ver and ver < MIN_NODE:
+                lines.append(f"{bad} Extensions: Node {'.'.join(map(str, ver))} is too old (need >= {'.'.join(map(str, MIN_NODE))})")
+            else:
+                exts = s.ext.report() if hasattr(s.ext, "report") else []
+                failed = [e for e in exts if not e.get("ok")]
+                load = sum(e.get("loadMs", 0) for e in exts)
+                lines.append(f"{ok if not failed else warn} Extensions: {len(exts)} loaded in {load} ms"
+                             + (f", {len(failed)} failed" if failed else "") + f" · Node {'.'.join(map(str, ver or ()))}")
+                for e in failed[:6]:
+                    lines.append(f"  {bad} {e['name']}: {str(e.get('error'))[:160]}")
+                slow = sorted(exts, key=lambda e: -(e.get("loadMs", 0) + sum((e.get("handlerMs") or {}).values())))[:3]
+                slow = [e for e in slow if e.get("loadMs", 0) + sum((e.get("handlerMs") or {}).values()) >= 200]
+                if slow:
+                    lines.append("  slowest: " + ", ".join(
+                        f"{e['name']} ({e.get('loadMs', 0) + sum((e.get('handlerMs') or {}).values())} ms)" for e in slow)
+                        + "   (/extensions slow for the full list)")
+        # Hermes plugins
+        from .caps import hermes_plugins, hooks as shell_hooks
+        host = hermes_plugins.host_of(s)
+        if host is not None:
+            good = [p for p in host.plugins if p["ok"]]
+            lines.append(f"{ok} Hermes plugins: {len(good)} loaded" + (f" ({', '.join(p['name'] for p in good)})" if good else ""))
+            for pl in host.plugins:
+                if pl["error"]:
+                    lines.append(f"  {bad if pl['error'] != 'disabled' else warn} {pl['name']}: {pl['error']}")
+                if pl["unsupported"]:
+                    lines.append(f"  {warn} {pl['name']} registers things this core has no slot for yet: {', '.join(sorted(set(pl['unsupported'])))}")
+        if s.caps.is_enabled("hooks"):
+            counts = {k: v for k, v in shell_hooks.summary(s).items() if v}
+            lines.append(f"{ok} Shell hooks: " + (", ".join(f"{k} ×{v}" for k, v in counts.items()) or "none configured (hooks.json)"))
+        # MCP
+        if s.mcp is not None:
+            try:
+                rows = [x for x in s.mcp.status_lines() if x.strip()]
+            except Exception:
+                rows = []
+            lines.append(f"{ok} MCP: {len(rows)} line(s) of status (/mcp for details)" if rows else f"{ok} MCP: no servers configured")
+            lines += [f"  {x.strip()[:160]}" for x in rows[:6]]
+        lines.append(f"{ok} Skills: {len(s.skills)} · prompt templates: {len(s.templates)} · context files: {len(s.context_files)}")
+        if getattr(s, "startup_seconds", 0):
+            lines.append(f"{ok} Background startup took {s.startup_seconds:.1f} s (the window opens before it finishes)")
+        notes = [d for d in s.diagnostics if "capability '" not in d][-6:]
+        if notes:
+            lines += ["", "Recent warnings:"] + [f"  {warn} {d[:200]}" for d in notes]
+        return lines
+
+    def cmd_doctor(self, args: str) -> None:
+        self.port.show("doctor", self.doctor_lines())
 
     def cmd_plan(self, args: str) -> None:
         s = self.s

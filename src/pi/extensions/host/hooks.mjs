@@ -5,7 +5,8 @@
 //   which plain type stripping rejects)
 // - rewrites named imports from host packages into destructuring from a Proxy, so an import of a name the shim
 //   does not implement yields a recorded stub instead of a link-time SyntaxError
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createRequire, stripTypeScriptTypes } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -97,15 +98,51 @@ export function rewriteVirtualImports(src) {
   });
 }
 
+// Compiled TypeScript is cached on disk, keyed by path + mtime + size + Node version: a start with many extensions
+// then reads ready-made JavaScript instead of transpiling every file again. OMNI_TS_CACHE=0 turns it off.
+const CACHE_DIR = process.env.OMNI_TS_CACHE === "0" ? null
+  : path.join(process.env.OMNI_TS_CACHE_DIR || path.join(os.tmpdir(), "omni-ts-cache"), process.version);
+let cacheReady = false;
+function cached(file, compile) {
+  if (!CACHE_DIR) return compile();
+  let key;
+  try {
+    const st = statSync(file);
+    key = createHash("sha1").update(`${file}\0${st.mtimeMs}\0${st.size}\0v3`).digest("hex");
+  } catch { return compile(); }
+  const hit = path.join(CACHE_DIR, key + ".js");
+  try { return readFileSync(hit, "utf8"); } catch {}
+  const out = compile();
+  try {
+    if (!cacheReady) { mkdirSync(CACHE_DIR, { recursive: true }); cacheReady = true; }
+    const tmp = `${hit}.${process.pid}.tmp`;
+    writeFileSync(tmp, out);
+    renameSync(tmp, hit);
+  } catch {}
+  return out;
+}
+
+// Extensions written as ES modules sometimes still call require() (Pi runs them through a bundler that allows
+// it). Give such a module a real `require` bound to its own location.
+const REQUIRE_PRELUDE = 'import { createRequire as __omniCreateRequire } from "node:module"; const require = __omniCreateRequire(import.meta.url);\n';
+function withRequire(src) {
+  if (!/(^|[^.\w$])require\s*\(/.test(src)) return src;
+  if (/\b(?:const|let|var|function)\s+require\b|\bcreateRequire\b|import\s+require\b/.test(src)) return src;
+  return REQUIRE_PRELUDE + src;
+}
+const VIRTUAL_MARK = /@(?:earendil-works|mariozechner|oh-my-pi)\/pi-|["'](?:@sinclair\/typebox|typebox)/;
+
 export async function load(url, context, nextLoad) {
   if (!url.startsWith("file:")) return nextLoad(url, context);
   const file = fileURLToPath(url);
   const ext = path.extname(file);
   const isShim = file.startsWith(path.join(HERE, "shims"));
   if (TS_EXT.includes(ext)) {
-    let src = readFileSync(file, "utf8");
-    src = ext === ".tsx" ? compileTsx(src, file, FALLBACK_ROOTS) : stripTypeScriptTypes(src, { mode: "transform", sourceUrl: url });
-    src = rewriteVirtualImports(src);
+    const src = cached(file, () => {
+      const raw = readFileSync(file, "utf8");
+      const js = ext === ".tsx" ? compileTsx(raw, file, FALLBACK_ROOTS) : stripTypeScriptTypes(raw, { mode: "transform", sourceUrl: url });
+      return ext === ".cts" ? rewriteVirtualImports(js) : withRequire(rewriteVirtualImports(js));
+    });
     const format = ext === ".cts" ? "commonjs" : "module";
     return { format, source: src, shortCircuit: true };
   }
@@ -117,7 +154,17 @@ export async function load(url, context, nextLoad) {
     const r = await nextLoad(url, context);
     if (r.format === "module" && r.source) {
       const src = typeof r.source === "string" ? r.source : Buffer.from(r.source).toString("utf8");
-      return { ...r, source: rewriteVirtualImports(src) };
+      return { ...r, source: withRequire(rewriteVirtualImports(src)) };
+    }
+    return r;
+  }
+  if (!isShim && (ext === ".js" || ext === ".mjs")) {
+    // A published extension bundle (node_modules/<pkg>/dist/index.js) imports Pi's packages by name too. Without the
+    // rewrite, one name the shim lacks is a link-time SyntaxError for the whole extension.
+    const r = await nextLoad(url, context);
+    if (r.format === "module" && r.source) {
+      const src = typeof r.source === "string" ? r.source : Buffer.from(r.source).toString("utf8");
+      if (VIRTUAL_MARK.test(src)) return { ...r, source: rewriteVirtualImports(src) };
     }
     return r;
   }

@@ -1,5 +1,4 @@
-import sys
-
 from .cli import main
+from .launcher import hard_exit
 
-sys.exit(main())
+hard_exit(main())

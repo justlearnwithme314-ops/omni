@@ -45,7 +45,18 @@ Features (native modules, `src/pi/caps/`):
 | `checkpoint` | `checkpoint`, `rewind` | Explore, then rewind: the exploration leaves the model's context and only the report stays (it remains in the session file and transcript) | Oh My Pi | ~200 |
 | `plan` | `exit_plan_mode` | `/plan` makes the session read-only (tool gate) until you approve the model's plan | Oh My Pi plan mode | ~80 |
 | `ast` | `ast_grep`, `ast_edit` | Structural search and rewrite through the `ast-grep` CLI; off and free when the program is not installed | Oh My Pi | ~300 |
+| `web-search` | `web_search` | Titles, URLs and snippets through Tavily, Brave or Exa (with a key) or DuckDuckGo (no key) | Oh My Pi, Hermes | ~70 |
+| `session-search` | `session_search`, `/search` | Find earlier conversations by text, across all projects | Hermes `session_search` | ~80 |
 | `hashline` | replaces `read`, `edit` | `read` shows `[path#TAG]` + numbered lines; `edit` takes line-addressed patches (`PUT 3.=5:` + `+rows`). Opt-in: in no built-in profile | Oh My Pi hashline mode | ~480 (replaces ~390) |
+
+Hosts for other people's code (also capabilities):
+
+| id | What it runs |
+|---|---|
+| `hermes-plugins` | Hermes plugins (`plugin.yaml` + `register(ctx)`) from `~/.hermes/plugins`, the project's `.hermes/plugins` and Omni's `plugins/hermes`, in-process, with their tools, commands, prompt sections and hooks: `pre_tool_call` (veto), `post_tool_call`, `transform_tool_result`, `transform_terminal_output`, `pre_llm_call` (adds context), `post_llm_call`, `on_session_start` / `on_session_end`. Other registrations are accepted and listed by `/doctor` as not supported yet |
+| `hooks` | Shell-command hooks in Claude Code's format (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`) from `<agent-dir>/hooks.json` and the project's `.omni/hooks.json`. Exit code 2 blocks. Claude Code's own settings files are read only when the profile sets `"hooks": {"claude": true}` |
+
+`task` also runs **named agents**: markdown files with `name` / `description` / `tools` / `model` frontmatter in `<agent-dir>/agents`, the project's `.omni/agents` or `.pi/agents`, and (with `skills-universal`) `.claude/agents`.
 
 Host switches (same commands, they flip profile keys):
 
@@ -98,6 +109,13 @@ Profile keys: `tools`, `capabilities`, `pi_extensions`, `omni_plugins_pi`, `omni
 `mcp`, `skills_budget_chars`, `skill_dirs` (extra folders for `skills-universal`), `memory.dir`, `prompt_append`,
 `accent`, `description`.
 
+## Startup time and health
+
+- The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.
+- Compiled TypeScript for extensions is cached on disk (`OMNI_TS_CACHE=0` turns it off).
+- `/extensions slow` ranks extensions by load time and by time spent in their event handlers.
+- `/doctor` shows sign-ins, modules, extension failures, Hermes plugins, hooks, MCP and recent warnings on one screen.
+
 ## Keeping context small
 
 - `core` adds nothing beyond Pi's prompt and four tool schemas.
@@ -124,7 +142,7 @@ CAPABILITIES = [Capability("hello", "Hello", "Example module.", tools=_tools)]
 
 Add `"hello"` to `_BUILTIN_MODULES` in `src/pi/caps/__init__.py` (or call `caps.register(...)` from your own
 Python). A capability may provide `tools`, a `prompt` section, `skill_roots`, a `skill_filter`, and an `available`
-check, a `gate` (block a tool call with a reason; plan mode uses it) and a `live_prompt` (re-read every request); a module that raises while loading is reported in `/capabilities` and skipped.
+check, `commands`, an `after_tool` and `on_prompt` hook, an `unload`, a `gate` (block a tool call with a reason; plan mode uses it) and a `live_prompt` (re-read every request); a module that raises while loading is reported in `/capabilities` and skipped.
 
 ## Status against the four harnesses
 
@@ -133,8 +151,10 @@ Done means covered by an offline test in `tests/`.
 | Area | Done | Not done yet |
 |---|---|---|
 | **Pi** | core loop, 7 tools, sessions, TUI, extensions host, MCP, packages, codemode, OAuth sign-ins (see `PI_PROFILE.md`) | keybindings.json, sixel images |
-| **Oh My Pi** | extensions load through the same host; `todo`, `task`, `ask`, `fetch`, `checkpoint` / `rewind`, plan mode, `ast_grep` / `ast_edit` (via the CLI), hashline edits (ranges, inserts, cut/paste registers, create / delete / move); OAuth flows ported | hashline syntax-block ops (`N*`), `lsp`, `web_search`, `github`, `eval`, model roles, TTSR, snapcompact, the remaining slash commands, its extra extension API |
-| **Hermes** | `memory` (file-compatible), `todo`, `delegate_task` equivalent, `skill_manage`, skill gating by `platforms`; plugins load as tools through the legacy adapter | plugin hooks (`pre_tool_call`, `pre_llm_call`, …) on the new core, memory-provider / context-engine plugin kinds, cron, messaging platforms, session search, self-evolution job |
+| **Oh My Pi** | extensions load through the same host; `todo`, `task`, `ask`, `fetch`, `checkpoint` / `rewind`, plan mode, `ast_grep` / `ast_edit` (via the CLI), hashline edits (ranges, inserts, cut/paste registers, create / delete / move), `web_search`, named agents for `task`; OAuth flows ported | hashline syntax-block ops (`N*`), `lsp`, `github`, `eval`, model roles, TTSR, snapcompact, the remaining slash commands, its extra extension API |
+| **Hermes** | `memory` (file-compatible), `todo`, `delegate_task` equivalent, `skill_manage`, `session_search`, `web_search`, skill gating by `platforms`; plugin host with tools, commands, prompt sections and the eight core hooks | the other plugin kinds (memory providers, context engines, platforms, image / video generation), streaming and API-request hooks, cron, messaging platforms, self-evolution job |
 | **OpenClaw** | skills with `metadata.openclaw` gating; plugins through the legacy adapter | `openclaw.plugin.json` + plugin SDK host, gateway daemon, channels, exec approvals, nodes, ACP |
 
 The order for the remaining work is in `INTEGRATION_PLAN.md` (phases 3-5).
+
+Beyond the four: shell hooks and named agents follow Claude Code's formats, so its hook scripts and `.claude/agents` files can be reused.

@@ -1,4 +1,3 @@
 @echo off
 setlocal
-set "PYTHONPATH=%~dp0;%PYTHONPATH%"
-python -m src.cli %*
+python "%~dp0omni_main.py" %*
