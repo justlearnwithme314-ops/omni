@@ -50,6 +50,10 @@ legacy registry's Hermes source is no longer used by the shipped profiles. Also 
 Claude Code format), `web-search`, `session-search`, named agents for `task`. Capabilities gained `after_tool`,
 `on_prompt`, `commands` and `unload`. Open in phase 4: remaining plugin kinds, cron, platforms, self-evolution.
 
+**Update (2026-11-12, later):** five capabilities modelled on other projects: `tracing` (Langfuse),
+`memory-archive` (Letta), `durable` (Temporal), `browser` (Browser Use), `sandbox` (Daytona). See
+`CAPABILITIES.md`. The reference repos are under `D:\Harness\references`.
+
 **Update (2026-11-10, later):** phase 2's profile part and phase 6's "point every profile at the new kernel" are done
 in a first form: `profiles/*.json` (`pi → lean → balanced → autonomous/full → evolve`), bare `omni` runs the core with
 the active profile, Omni's MasterToolRegistry (MCP, Hermes, OpenClaw, Omni tools) is bridged in as core tools for

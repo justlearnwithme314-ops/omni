@@ -60,10 +60,10 @@ of it, from the barebones `core` (about 1,000 tokens of prompt and tool schemas)
 | `core` | read/bash/edit/write, extensions (real Pi / Oh My Pi ones, via a Node host), skills, prompt templates, JSONL sessions | `pi` |
 | `lean` | grep, find, ls | |
 | `coder` | todo list, subagents (`task`), clarifying questions (`ask`), web `fetch`, context checkpoints, plan mode (`/plan`), AST search | `omp` |
-| `assistant` | persistent memory, self-written skills, skills shared with other harnesses, todo, subagents, fetch | `hermes` |
+| `assistant` | persistent and archival memory, self-written skills, shared skills, Hermes plugins, search, tracing, resumable runs | `hermes` |
 | `balanced` | todo, ask, fetch, MCP registry, Hermes plugins, Omni tools (browser, LSP), permission gate | |
 | `autonomous` | + subagents, memory, shared skills, OpenClaw plugins, autonomous-work prompt | `openclaw` |
-| `full` | everything | |
+| `full` | everything, including browser control | |
 
 Each addition is a **capability** you can switch on or off independently, and every one reports what it costs in
 context tokens:

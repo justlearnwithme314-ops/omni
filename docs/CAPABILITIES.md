@@ -109,6 +109,23 @@ Profile keys: `tools`, `capabilities`, `pi_extensions`, `omni_plugins_pi`, `omni
 `mcp`, `skills_budget_chars`, `skill_dirs` (extra folders for `skills-universal`), `memory.dir`, `prompt_append`,
 `accent`, `description`.
 
+## Ideas taken from other open-source projects
+
+Each of these is a capability, built on the Python standard library (the browser one also needs `websockets`).
+The projects themselves are cloned under `D:\Harness\references` for reading; none of their code runs here.
+
+| id | Project it follows | What it does here | In profiles |
+|---|---|---|---|
+| `tracing` | Langfuse | Every run is a trace of generations (model, tokens, cost, latency) and tool spans. Written to `<agent-dir>/traces/<session>.jsonl`; sent to a Langfuse server when `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` are set. `/trace` shows the last run. `"tracing": {"content": false}` keeps text out | assistant, autonomous, full |
+| `memory-archive` | Letta (MemGPT) | Archival memory: `archival_memory_insert` / `archival_memory_search` over an unbounded SQLite full-text store. Only a one-line count is in the prompt. Together with `memory` (core) and `session-search` (recall) this gives Letta's three tiers | assistant, autonomous, full |
+| `durable` | Temporal | Run markers in the session file detect a run that was cut off; `/resume-run` continues it without repeating finished tool calls, and unfinished calls get an "interrupted, effect unknown" result. Transient failures of read-only tools are retried with backoff | assistant, autonomous, full |
+| `browser` | Browser Use | One `browser` tool. Pages are shown as numbered interactive elements (`[3]<button>Sign in</button>`) and the model acts on the number; every action returns the new page state | full |
+| `sandbox` | Daytona | `bash` runs in a per-session Docker / Podman container with the project mounted at `/workspace` and the network off; removed when the session ends. `/sandbox` shows it. Off and free without a container runtime | none (opt-in) |
+
+Not taken over: Temporal's server, workers and multi-language SDKs; Letta's agent server, sleep-time agents and
+vector search; Browser Use's vision mode and cloud browsers; Daytona's snapshots, remote workspaces and API;
+Langfuse's prompt management, evaluations and dashboards.
+
 ## Startup time and health
 
 - The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.

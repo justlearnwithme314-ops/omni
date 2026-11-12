@@ -9,7 +9,10 @@
     "+skills-universal",
     "+checkpoint",
     "+session-search",
-    "+hermes-plugins"
+    "+hermes-plugins",
+    "+memory-archive",
+    "+tracing",
+    "+durable"
   ],
   "skills_budget_chars": 8000,
   "omni_registry": {
