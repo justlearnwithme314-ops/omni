@@ -53,6 +53,9 @@ class CapCase(PiTestCase):
         self.profiles = Path(tempfile.mkdtemp(prefix="omni-caps-profiles-"))
         self._env = os.environ.get("OMNI_PROFILES_DIR")
         os.environ["OMNI_PROFILES_DIR"] = str(self.profiles)
+        # a fixed profile for tests, so shipped profiles can grow without breaking them
+        (self.profiles / "tcoder.json").write_text(json.dumps(
+            {"name": "tcoder", "extends": "lean", "capabilities": ["todo", "task", "ask", "fetch"]}))
 
     def tearDown(self):
         if self._env is None:
@@ -82,10 +85,12 @@ class TestProfilesAndToggles(CapCase):
     def test_core_is_untouched_and_profiles_compose(self):
         s = self.session(profile="core")
         self.assertEqual((s.active_tool_names, s.caps.enabled, s.caps.prompt_section()), (["read", "bash", "edit", "write"], [], ""))
-        self.assertEqual(load_profile("coder")["capabilities"], ["todo", "task", "ask", "fetch", "checkpoint", "plan", "ast"])
-        self.assertEqual(load_profile("autonomous")["capabilities"],
-                         ["todo", "ask", "fetch", "task", "memory", "skills-universal", "checkpoint"])  # balanced + edits
-        self.assertEqual(load_profile("full")["capabilities"][-3:], ["skill-authoring", "plan", "ast"])
+        coder, bal, auto, full = (load_profile(n)["capabilities"] for n in ("coder", "balanced", "autonomous", "full"))
+        self.assertTrue({"todo", "task", "ask", "fetch", "checkpoint", "plan"} <= set(coder))
+        self.assertEqual(auto[:len(bal)], bal)                       # `+x` entries extend the parent's list
+        self.assertTrue({"task", "memory", "skills-universal"} <= set(auto) - set(bal))
+        self.assertTrue(set(auto) < set(full) and "skill-authoring" in full)
+        self.assertEqual(len(full), len(set(full)))
         self.assertNotIn("hashline", load_profile("full")["capabilities"])  # changes `edit`: opt-in only
         self.assertEqual(capmod.merge_capability_lists(["a", "b"], ["+c", "-a"]), ["b", "c"])
         self.assertEqual(capmod.merge_capability_lists(["a", "b"], ["x"]), ["x"])
@@ -94,10 +99,8 @@ class TestProfilesAndToggles(CapCase):
             self.assertEqual([c for c in p["capabilities"] if c not in capmod.load_builtin()], [], p["name"])
 
     def test_coder_profile_tools_and_cost(self):
-        s = self.session(profile="coder")
-        self.assertEqual([n for n in s.active_tool_names if not n.startswith("ast_")],  # ast_* only where ast-grep is installed
-                         ["read", "bash", "edit", "write", "grep", "find", "ls", "todo", "task", "ask", "fetch",
-                          "checkpoint", "rewind", "exit_plan_mode"])
+        s = self.session(profile="tcoder")
+        self.assertEqual(s.active_tool_names, ["read", "bash", "edit", "write", "grep", "find", "ls", "todo", "task", "ask", "fetch"])
         rows = {r["id"]: r for r in s.caps.rows()}
         self.assertTrue(rows["todo"]["on"] and rows["todo"]["tokens"] > 20)
         self.assertEqual(rows["todo"]["tools"], ["todo"])
@@ -124,18 +127,18 @@ class TestProfilesAndToggles(CapCase):
         self.assertNotIn("memory", s.active_tool_names)
         cmds.cmd_capabilities("nope")
         self.assertTrue(any(l == "error" and "Unknown capability" in t for l, t in port.notes))
-        s3 = self.session(profile="coder", capabilities=["fetch"])  # --capabilities replaces profile + overlay
+        s3 = self.session(profile="tcoder", capabilities=["fetch"])  # --capabilities replaces profile + overlay
         self.assertEqual(s3.caps.enabled, ["fetch"])
-        s4 = self.session(profile="coder", capabilities=[])
+        s4 = self.session(profile="tcoder", capabilities=[])
         self.assertEqual(s4.caps.enabled, [])
 
     def test_picker_lists_everything_with_costs_and_saves_custom_profile(self):
-        s = self.session(profile="coder")
+        s = self.session(profile="tcoder")
         port = Port(answers=[None])
         cmds = Commands(s, port)
         cmds.cmd_capabilities("")
         title, rows = port.selects[0]
-        self.assertIn("profile coder", title)
+        self.assertIn("profile tcoder", title)
         self.assertIn("tokens per request", title)
         self.assertTrue(any(r.startswith("[x] todo") and "tok)" in r for r in rows))
         self.assertTrue(any(r.startswith("[ ] memory") for r in rows))
@@ -144,12 +147,11 @@ class TestProfilesAndToggles(CapCase):
         cmds.cmd_capabilities("memory on")
         cmds.cmd_profile("save My-Setup")
         saved = json.loads((self.profiles / "my-setup.json").read_text())
-        self.assertEqual((saved["extends"], saved["capabilities"]),
-                         ("coder", ["todo", "task", "fetch", "checkpoint", "plan", "ast", "memory"]))
+        self.assertEqual((saved["extends"], saved["capabilities"]), ("tcoder", ["todo", "task", "fetch", "memory"]))
         (self.agent / "omni-capabilities.json").unlink()
         s2 = self.session(profile="my-setup")
-        self.assertEqual([c for c in s2.caps.enabled if c != "ast"], ["todo", "task", "fetch", "checkpoint", "plan", "memory"])
-        self.assertIn("grep", s2.active_tool_names)  # inherited from coder -> lean
+        self.assertEqual(s2.caps.enabled, ["todo", "task", "fetch", "memory"])
+        self.assertIn("grep", s2.active_tool_names)  # inherited from tcoder -> lean
         cmds.cmd_profile("save core")
         self.assertTrue(any(l == "error" and "built-in" in t for l, t in port.notes))
 

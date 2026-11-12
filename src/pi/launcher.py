@@ -141,4 +141,17 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
     if args is None:
         return
     from .cli import main
-    sys.exit(main(args))
+    hard_exit(main(args))
+
+
+def hard_exit(code: int) -> None:
+    """Leave now. A normal interpreter exit joins every worker thread first (the extension host's dispatch pool,
+    plugin event loops), which added ~5 s after the answer was already printed. Session files are written
+    synchronously, so nothing is lost by skipping that."""
+    import os
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    os._exit(int(code or 0))

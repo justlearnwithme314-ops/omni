@@ -40,6 +40,13 @@ class Capability:
     available: Optional[Callable[[Any], Optional[str]]] = None          # session -> why it cannot run here
     live_prompt: Optional[Callable[[Any], str]] = None                  # like `prompt`, but re-read every request
     gate: Optional[Callable[[Any, str, Dict[str, Any]], Optional[str]]] = None  # (session, tool, args) -> reason to block
+    # (session, tool, args, result) -> replacement result or None; runs after the tool, before extensions see it
+    after_tool: Optional[Callable[[Any, str, Dict[str, Any], Dict[str, Any]], Optional[Dict[str, Any]]]] = None
+    # (session, text) -> extra context to append to the user's message, or a {"block": reason} dict
+    on_prompt: Optional[Callable[[Any, str], Any]] = None
+    # session -> {command name: (description, handler(args) -> text or None)}: slash commands
+    commands: Optional[Callable[[Any], Dict[str, Any]]] = None
+    unload: Optional[Callable[[Any], None]] = None                      # session -> None, on reload / shutdown
     # switch-type capabilities edit the profile instead of adding tools: (profile dict, on) -> None
     apply: Optional[Callable[[Dict[str, Any], bool], None]] = None
     is_on: Optional[Callable[[Dict[str, Any]], bool]] = None            # switch-type: read state from a profile
@@ -47,7 +54,8 @@ class Capability:
 
 
 CAPABILITIES: Dict[str, Capability] = {}
-_BUILTIN_MODULES = ["todo", "ask", "fetch", "memory", "task", "skills", "checkpoint", "hashline", "ast", "plan", "hosts"]
+_BUILTIN_MODULES = ["todo", "ask", "fetch", "memory", "task", "skills", "checkpoint", "hashline", "ast", "plan", "search",
+                    "hooks", "hermes_plugins", "hosts"]
 _loaded = False
 
 
@@ -145,6 +153,7 @@ class CapabilityManager:
     def load(self) -> None:
         caps = load_builtin()
         s = self.session
+        self.unload()  # hosts started by a previous load (plugin processes, listeners) go first
         self.tools, self.owner, self.enabled, self.problems, self._prompts = {}, {}, [], {}, {}
         quiet: set = set()
         for cid in s.profile.get("capabilities") or []:
@@ -186,6 +195,56 @@ class CapabilityManager:
                 if text:
                     parts.append(text.strip())
         return "\n\n".join(parts)
+
+    def _each(self, attr: str):
+        for cid in self.enabled:
+            cap = CAPABILITIES.get(cid)
+            fn = getattr(cap, attr, None) if cap is not None else None
+            if fn is not None:
+                yield cid, fn
+
+    def after_tool(self, tool_name: str, args: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+        for cid, fn in self._each("after_tool"):
+            try:
+                r = fn(self.session, tool_name, args or {}, result)
+            except Exception as e:
+                self.session.diagnostics.append(f"capability '{cid}' after_tool: {type(e).__name__}: {e}")
+                continue
+            if isinstance(r, dict) and r.get("content") is not None:
+                result = r
+        return result
+
+    def on_prompt(self, text: str):
+        """(extra context to append, block reason). Hooks run in capability order; the first block wins."""
+        extra: List[str] = []
+        for cid, fn in self._each("on_prompt"):
+            try:
+                r = fn(self.session, text)
+            except Exception as e:
+                self.session.diagnostics.append(f"capability '{cid}' on_prompt: {type(e).__name__}: {e}")
+                continue
+            if isinstance(r, dict) and r.get("block"):
+                return "", str(r["block"])
+            if isinstance(r, str) and r.strip():
+                extra.append(r.strip())
+        return "\n\n".join(extra), None
+
+    def commands(self) -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        for cid, fn in self._each("commands"):
+            try:
+                for name, spec in (fn(self.session) or {}).items():
+                    out.setdefault(name, spec)
+            except Exception:
+                continue
+        return out
+
+    def unload(self) -> None:
+        for _cid, fn in self._each("unload"):
+            try:
+                fn(self.session)
+            except Exception:
+                pass
 
     def gate(self, tool_name: str, args: Dict[str, Any]) -> Optional[str]:
         """First reason any enabled capability gives for blocking this tool call (None = allowed)."""

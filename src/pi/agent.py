@@ -237,6 +237,11 @@ class AgentSession:
         self._idle = threading.Event()
         self._idle.set()
         self.extra_prompt_guidelines: List[str] = []
+        self._ready = threading.Event()   # set once extensions / plugin hosts are loaded
+        self._ready.set()
+        self.loading = False
+        self._early_model: Optional[Dict[str, Any]] = None
+        self.startup_seconds = 0.0
 
     # ================================================================================== startup
     def _resolve_trust(self) -> bool:
@@ -258,19 +263,61 @@ class AgentSession:
                 return ok
         return False
 
-    def start(self) -> None:
-        """Load resources, extensions, model and session. Emits session_start."""
+    def start(self, defer_hosts: bool = False) -> None:
+        """Load resources, extensions, model and session. Emits session_start.
+
+        `defer_hosts=True` (the terminal UI) returns as soon as the session, model and built-in tools are usable -
+        well under a second - and leaves the slow part (extension host, plugin registry, MCP, `session_start`
+        handlers) to `finish_start()`, which the caller runs on a background thread. `prompt()` waits for it."""
+        self._ready.clear()
         self.load_resources()
-        if not self.opts.no_extensions:
-            self._start_extensions()
-        self._load_profile_capabilities()
-        self._open_initial_session()
-        self._select_initial_model()
-        self._init_tools()
-        self._start_mcp()
-        self.last_system_prompt = self.system_prompt()
-        self.emit("session_start", {"reason": "startup"})
-        self.emit("resources_discover", {"reason": "startup"})
+        if defer_hosts:
+            self.caps.load()
+            self._open_initial_session()
+            self._select_initial_model()
+            self._early_model = self.model
+            self._init_tools()
+            self.last_system_prompt = self.system_prompt()
+            self.loading = True
+            return
+        try:
+            if not self.opts.no_extensions:
+                self._start_extensions()
+            self._load_profile_capabilities()
+            self._open_initial_session()
+            self._select_initial_model()
+            self._init_tools()
+            self._start_mcp()
+            self.last_system_prompt = self.system_prompt()
+            self.emit("session_start", {"reason": "startup"})
+            self.emit("resources_discover", {"reason": "startup"})
+        finally:
+            self._ready.set()
+
+    def finish_start(self) -> None:
+        """Second half of a deferred start. Safe to call from a worker thread."""
+        t0 = time.time()
+        try:
+            if not self.opts.no_extensions:
+                self._start_extensions()
+            self._load_profile_capabilities()
+            if self.model is self._early_model:  # extension providers may own the saved / default model
+                self._select_initial_model()
+            self._init_tools()
+            self._start_mcp()
+            self.last_system_prompt = self.system_prompt()
+            self.emit("session_start", {"reason": "startup"})
+            self.emit("resources_discover", {"reason": "startup"})
+        except Exception as e:  # the window is already up: report, never crash it
+            self.diagnostics.append(f"startup: {type(e).__name__}: {e}")
+        finally:
+            self.loading = False
+            self.startup_seconds = time.time() - t0
+            self._ready.set()
+            self._notify({"type": "startup_complete", "seconds": self.startup_seconds})
+
+    def wait_ready(self, timeout: Optional[float] = None) -> bool:
+        return self._ready.wait(timeout)
 
     def _resolve_profile(self, name: Optional[str]) -> None:
         """Profile file (through `extends`) + the user's capability overlay; `--capabilities` replaces both."""
@@ -605,6 +652,7 @@ class AgentSession:
 
     def prompt(self, text: str, images: Optional[List[Dict[str, Any]]] = None, source: str = "interactive") -> None:
         """Blocking: run one prompt to completion. Call from a worker thread in interactive mode."""
+        self._ready.wait()  # a message typed while extensions are still loading runs as soon as they are in
         if text.startswith("/"):
             # `/name` or `/<source-prefix>:name`; a duplicate name uses the remembered source, else Pi's order
             from .command_sources import CommandSources
@@ -623,6 +671,12 @@ class AgentSession:
                 text = r.get("text", text)
                 images = r.get("images", images)
         text = self.expand_input(text)
+        extra, blocked = self.caps.on_prompt(text)  # prompt hooks: Hermes pre_llm_call, shell UserPromptSubmit
+        if blocked:
+            self._notify({"type": "notice", "level": "warning", "message": f"Message blocked by a hook: {blocked}"})
+            return
+        if extra:
+            text = f"{text}\n\n{extra}"
         content: Any = text if not images else [{"type": "text", "text": text}] + list(images)
         user_msg = {"role": "user", "content": content, "timestamp": now_ms()}
         self.run([user_msg])
@@ -1081,6 +1135,7 @@ class AgentSession:
                         result = {"content": [{"type": "text", "text": str(e)}], "isError": True, "details": None}
                     except Exception as e:
                         result = {"content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}], "isError": True, "details": None}
+                    result = self.caps.after_tool(call["name"], args, result)
                     r2 = self.emit("tool_result", {"toolCallId": call["id"], "toolName": call["name"], "input": args,
                                                    "content": result.get("content"), "details": result.get("details"),
                                                    "isError": bool(result.get("isError"))}, to_ui=False)
@@ -1406,6 +1461,7 @@ class AgentSession:
     def shutdown(self, reason: str = "quit") -> None:
         self.abort()
         self.emit("session_shutdown", {"reason": reason})
+        self.caps.unload()
         try:
             self.ext.shutdown()
         except Exception:
@@ -1428,6 +1484,7 @@ class AgentSession:
         self.reload()
 
     def reload(self) -> None:
+        self._ready.wait()
         self.emit("session_shutdown", {"reason": "reload"})
         try:
             self.ext.shutdown()

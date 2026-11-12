@@ -6,6 +6,7 @@
   "capabilities": [
     "+skill-authoring",
     "+plan",
-    "+ast"
+    "+ast",
+    "+hooks"
   ]
 }

@@ -10,6 +10,7 @@
     "fetch",
     "checkpoint",
     "plan",
-    "ast"
+    "ast",
+    "web-search"
   ]
 }

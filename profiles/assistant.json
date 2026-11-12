@@ -10,7 +10,10 @@
     "ask",
     "fetch",
     "skills-universal",
-    "skill-authoring"
+    "skill-authoring",
+    "web-search",
+    "session-search",
+    "hermes-plugins"
   ],
   "skills_budget_chars": 8000
 }

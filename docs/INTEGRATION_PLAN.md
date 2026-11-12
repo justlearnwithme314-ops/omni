@@ -43,6 +43,13 @@ Still open from phase 2: `ExecutionBackend` / `Scheduler` / `Channel` registries
 Open in phase 3: hashline block ops, `lsp`, `web_search`, `github`, `eval`, model roles, TTSR, snapcompact,
 the command list and the extension API delta.
 
+**Update (2026-11-12):** startup is deferred (window first, hosts in the background), extension TypeScript is
+cached, and `/doctor` + `/extensions slow` exist. Phase 4 started: `hermes-plugins` is a native in-process host
+with `PluginContext` (tools, commands, prompt sections, config) and eight hooks mapped onto the pipeline; the
+legacy registry's Hermes source is no longer used by the shipped profiles. Also new: `hooks` (shell hooks,
+Claude Code format), `web-search`, `session-search`, named agents for `task`. Capabilities gained `after_tool`,
+`on_prompt`, `commands` and `unload`. Open in phase 4: remaining plugin kinds, cron, platforms, self-evolution.
+
 **Update (2026-11-10, later):** phase 2's profile part and phase 6's "point every profile at the new kernel" are done
 in a first form: `profiles/*.json` (`pi → lean → balanced → autonomous/full → evolve`), bare `omni` runs the core with
 the active profile, Omni's MasterToolRegistry (MCP, Hermes, OpenClaw, Omni tools) is bridged in as core tools for
