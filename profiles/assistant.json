@@ -13,7 +13,10 @@
     "skill-authoring",
     "web-search",
     "session-search",
-    "hermes-plugins"
+    "hermes-plugins",
+    "memory-archive",
+    "tracing",
+    "durable"
   ],
   "skills_budget_chars": 8000
 }
