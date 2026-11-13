@@ -227,6 +227,8 @@ class Conversation:
     key: str
     session: Any = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+    notify: Optional[Callable[[str], None]] = None      # send an extra message into this conversation (not for HTTP)
+    pending: Optional["queue.Queue[str]"] = None        # an approval question waiting for the user's reply
 
 
 class Gateway:
@@ -306,11 +308,25 @@ class Gateway:
             append_system_prompt="You are being used through a chat app. Keep answers short and plain (no tables, minimal "
                                  "markdown). Nobody can answer interactive prompts; if you need a decision, ask in your reply.")
         s = AgentSession(opts, ui=HeadlessUI())
+        s.approver = lambda question, c=conv: self._ask_in_chat(c, question)   # used by the `approvals` capability
+        s.gateway_target = key                                                  # scheduled jobs created here report back here
         s.start()
         conv.session = s
         files[key] = str(s.sessions.file or "")
         self._save_state("conversations.json", files)
         return s
+
+    def _ask_in_chat(self, conv: Conversation, question: str, timeout: float = 300.0) -> str:
+        if conv.notify is None:
+            return "unattended"  # nowhere to ask (HTTP request/response, tests calling handle directly)
+        conv.pending = queue.Queue()
+        try:
+            conv.notify(question + "\nReply yes, always or no.")
+            return conv.pending.get(timeout=timeout)
+        except queue.Empty:
+            return "deny"
+        finally:
+            conv.pending = None
 
     # --- handling
     def handle(self, msg: Inbound) -> str:
@@ -323,6 +339,11 @@ class Gateway:
         conv = self.conversations.setdefault(key, Conversation(key))
         cmd = msg.text.strip().split()[0].lower() if msg.text.strip().startswith("/") else ""
         cmd = cmd.split("@")[0]
+        if conv.pending is not None and not cmd:  # this message answers an approval question
+            word = msg.text.strip().lower().rstrip(".!")
+            answer = "once" if word in ("yes", "y", "ok", "approve", "allow") else "always" if word == "always" else "deny"
+            conv.pending.put(answer)
+            return {"once": "Approved once.", "always": "Approved; I will not ask about this kind again.", "deny": "Denied."}[answer]
         if cmd == "/stop":
             if conv.session is not None and conv.session.is_streaming:
                 conv.session.abort()
@@ -359,6 +380,9 @@ class Gateway:
         def keep_typing() -> None:
             while not stop_typing.wait(4.0):
                 channel.typing(msg.chat)
+        if msg.reply is None:
+            self.conversations.setdefault(f"{msg.channel}:{msg.chat}", Conversation(f"{msg.channel}:{msg.chat}")).notify = \
+                lambda text, c=channel, chat=msg.chat: c.send(chat, text)
         channel.typing(msg.chat)
         threading.Thread(target=keep_typing, daemon=True).start()
         try:
@@ -400,6 +424,27 @@ class Gateway:
                     conv.session.shutdown()
                 except Exception:
                     pass
+
+
+def deliver(agent_dir: Path, target: str, text: str) -> Optional[str]:
+    """Send `text` to a conversation ("telegram:<chat id>") using the channel settings in gateway.json.
+    Returns None on success, else why it could not be delivered. Used for scheduled-job results."""
+    name, _, chat = str(target).partition(":")
+    cfg = (load_config(agent_dir).get("channels") or {}).get(name)
+    if not isinstance(cfg, dict) or not chat:
+        return f"no channel '{name}' in gateway.json"
+    factory = CHANNEL_TYPES.get(str(cfg.get("type") or name))
+    if factory is None or name == "http":
+        return f"channel '{name}' cannot receive unprompted messages"
+    try:
+        ch = factory(cfg)
+        try:
+            ch.send(chat, text)
+        finally:
+            ch.close()
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+    return None
 
 
 def approve(agent_dir: Path, code: str) -> str:

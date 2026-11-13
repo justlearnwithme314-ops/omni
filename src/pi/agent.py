@@ -321,8 +321,9 @@ class AgentSession:
 
     def _resolve_profile(self, name: Optional[str]) -> None:
         """Profile file (through `extends`) + the user's capability overlay; `--capabilities` replaces both."""
-        from .caps import effective_profile
+        from .caps import effective_profile, load_user
         from .profiles import load_profile
+        load_user(self.agent_dir)  # your own capability modules must be known before the profile names them
         self.base_profile = load_profile(name)
         explicit = self.opts.capabilities
         self.profile = effective_profile(self.base_profile, self.agent_dir, use_overlay=explicit is None)

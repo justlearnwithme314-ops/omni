@@ -66,6 +66,10 @@ HTTP channels, allowlist + pairing codes, one persistent session per conversatio
 `diagnostics`, `memory-reflect`, `/rate`, browser screenshots, and `requires` between capabilities. Open: hosting
 OpenClaw channel / provider plugins, more channels, cron delivery to channels, ACP, Hermes plugin kinds, `lsp`.
 
+**Update (2026-11-13, evening):** user-written capability modules (`<agent-dir>/capabilities/*.py`), `approvals`
+(UI, chat and unattended decisions), `code-exec`, Hermes memory-provider plugins, cron delivery to gateway channels,
+and `omni profile new | show | delete`. `balanced` now uses `approvals` instead of the legacy permission gate.
+
 **Update (2026-11-10, later):** phase 2's profile part and phase 6's "point every profile at the new kernel" are done
 in a first form: `profiles/*.json` (`pi → lean → balanced → autonomous/full → evolve`), bare `omni` runs the core with
 the active profile, Omni's MasterToolRegistry (MCP, Hermes, OpenClaw, Omni tools) is bridged in as core tools for

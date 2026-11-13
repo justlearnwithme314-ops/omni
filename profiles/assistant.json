@@ -20,7 +20,9 @@
     "scheduler",
     "claude-compat",
     "memory-reflect",
-    "diagnostics"
+    "diagnostics",
+    "approvals",
+    "code-exec"
   ],
   "skills_budget_chars": 8000
 }

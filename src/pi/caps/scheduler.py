@@ -118,12 +118,12 @@ def save_jobs(agent_dir: Path, jobs: List[Dict[str, Any]]) -> None:
 
 
 def create_job(agent_dir: Path, name: str, prompt: str, schedule_text: str, cwd: str, profile: str = "",
-               model: str = "", now: Optional[float] = None) -> Dict[str, Any]:
+               model: str = "", now: Optional[float] = None, deliver: str = "") -> Dict[str, Any]:
     sched = parse_schedule(schedule_text)
     now = time.time() if now is None else now
     job = {"id": uuid.uuid4().hex[:8], "name": name.strip() or prompt.strip()[:40], "prompt": prompt, "schedule": schedule_text.strip(),
            "cwd": cwd, "profile": profile, "model": model, "enabled": True, "created": now,
-           "next_run": next_run(sched, now), "last_run": None, "last_status": None, "runs": 0}
+           "next_run": next_run(sched, now), "last_run": None, "last_status": None, "runs": 0, "deliver": deliver}
     with _file_lock:
         jobs = load_jobs(agent_dir)
         jobs.append(job)
@@ -221,7 +221,12 @@ def run_due(agent_dir: Path, now: Optional[float] = None, only: Optional[str] = 
                 if parse_schedule(j["schedule"])["kind"] == "once":
                     j["enabled"], j["next_run"] = False, None
             save_jobs(agent_dir, jobs)
-        results.append({"id": job["id"], "name": job["name"], "status": status, "text": text, "file": str(out_file)})
+        undelivered = None
+        if job.get("deliver"):  # send the result to the chat the job belongs to (gateway channels)
+            from ..gateway import deliver as send_to_chat
+            undelivered = send_to_chat(agent_dir, job["deliver"], f"⏰ {job['name']} ({status})\n\n{text[:3500]}")
+        results.append({"id": job["id"], "name": job["name"], "status": status, "text": text, "file": str(out_file),
+                        "delivered": bool(job.get("deliver")) and undelivered is None, "delivery_error": undelivered})
     return results
 
 
@@ -246,7 +251,8 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
             from ..ai.models import model_key
             try:
                 job = create_job(agent, str(p.get("name") or ""), prompt, schedule, session.cwd,
-                                 str(session.base_profile.get("name") or ""), model_key(session.model) if session.model else "")
+                                 str(session.base_profile.get("name") or ""), model_key(session.model) if session.model else "",
+                                 deliver=str(p.get("deliver") or getattr(session, "gateway_target", "") or ""))
             except ValueError as e:
                 raise ToolError(str(e)) from None
             return text_result(f"Scheduled job {job['id']} \"{job['name']}\" ({job['schedule']}); next run {_when(job['next_run'])}.",
@@ -282,7 +288,8 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
                     "self-contained: the scheduled run does not see this conversation.",
         parameters={"type": "object", "properties": {
             "action": {"type": "string", "enum": ["create", "list", "run", "pause", "resume", "remove"]},
-            "prompt": {"type": "string"}, "schedule": {"type": "string"}, "name": {"type": "string"}, "id": {"type": "string"}},
+            "prompt": {"type": "string"}, "schedule": {"type": "string"}, "name": {"type": "string"}, "id": {"type": "string"},
+            "deliver": {"type": "string", "description": "send results to a chat, e.g. telegram:123456 (optional)"}},
             "required": ["action"]},
         execute=execute, prompt_snippet="Schedule prompts to run later or repeatedly")}
 

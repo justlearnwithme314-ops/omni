@@ -1,7 +1,7 @@
 {
   "name": "balanced",
   "extends": "lean",
-  "description": "Everyday work: lean + todo, ask, fetch, MCP servers, Hermes plugins, Omni tools, and a permission gate.",
+  "description": "Everyday work: lean + todo, ask, fetch, search, diagnostics, approvals for destructive commands, Hermes plugins, Omni tools.",
   "accent": "#9ece6a",
   "capabilities": [
     "todo",
@@ -9,7 +9,9 @@
     "fetch",
     "web-search",
     "hermes-plugins",
-    "diagnostics"
+    "diagnostics",
+    "approvals",
+    "code-exec"
   ],
   "omni_registry": {
     "enabled": true,
@@ -18,5 +20,5 @@
       "omni"
     ]
   },
-  "permission_gate": true
+  "permission_gate": false
 }

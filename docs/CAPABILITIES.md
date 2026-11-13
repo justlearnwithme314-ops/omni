@@ -78,6 +78,19 @@ More feature modules:
 
 A module can declare `requires`. One whose requirement is off is reported in `/capabilities` and `/doctor` with the command that fixes it; the profile wizard adds requirements, and removes dependents, for you.
 
+| id | What it does | Follows |
+|---|---|---|
+| `approvals` | Asks before destructive shell commands (recursive deletes, force pushes, `sudo`, piping downloads into a shell, …) and edits outside the project. Answer in the UI, or from chat through the gateway (`yes` / `always` / `no`); with nobody to ask it is denied and the model is told. `/approvals` shows and resets the always-allow list. A guard against mistakes, not a security boundary | Hermes command approval, OpenClaw exec approvals |
+| `code-exec` | `execute_code`: run a Python or JavaScript snippet in the project folder, with a timeout and capped output | Hermes `execute_code`, Oh My Pi `eval` |
+
+**Your own modules.** Put a Python file that defines `CAPABILITIES = [Capability(...)]` in `<agent-dir>/capabilities/` (or a trusted project's `.omni/capabilities/`). It shows up in `/capabilities`, the profile wizard and `omni toggle` like a built-in one; built-in ids cannot be replaced.
+
+**Hermes memory providers.** A Hermes plugin that calls `ctx.register_memory_provider(...)` gets its prompt block, per-message recall, turn sync and tools wired in (one external provider at a time, as in Hermes).
+
+**Scheduled jobs and chat.** A job created in a gateway conversation reports back to that chat; `deliver: "telegram:<chat id>"` sets it explicitly.
+
+**Profiles from the shell.** `omni profile new <name> --from lean --add todo,fetch --remove mcp`, `omni profile show <name>`, `omni profile delete <name>`.
+
 Host switches (same commands, they flip profile keys):
 
 | id | Controls |
