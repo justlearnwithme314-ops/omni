@@ -60,6 +60,12 @@ model roles for subagents, and a profile wizard (`/profile new | edit | show | d
 `template_roots`, `agent_roots`, `hook_files` and `mcp_files`. Reference clones now include `letta-code`,
 `letta-archive` and `daytona-v0.190.0`.
 
+**Update (2026-11-13, later):** phase 5 started. `openclaw-plugins` loads OpenClaw plugin entries in the Node host
+(tools, commands, core hooks; other registrations recorded). `omni gateway` exists (`src/pi/gateway.py`): Telegram and
+HTTP channels, allowlist + pairing codes, one persistent session per conversation, a `register_channel` point. Also:
+`diagnostics`, `memory-reflect`, `/rate`, browser screenshots, and `requires` between capabilities. Open: hosting
+OpenClaw channel / provider plugins, more channels, cron delivery to channels, ACP, Hermes plugin kinds, `lsp`.
+
 **Update (2026-11-10, later):** phase 2's profile part and phase 6's "point every profile at the new kernel" are done
 in a first form: `profiles/*.json` (`pi → lean → balanced → autonomous/full → evolve`), bare `omni` runs the core with
 the active profile, Omni's MasterToolRegistry (MCP, Hermes, OpenClaw, Omni tools) is bridged in as core tools for

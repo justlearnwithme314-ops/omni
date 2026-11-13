@@ -392,6 +392,7 @@ class AgentSession:
         from .packages import is_package_spec
         extra = [e for e in self.opts.extensions if not is_package_spec(e)]
         extra += [str(p) for p in getattr(self, "package_resources", {}).get("extensions", [])]
+        extra += [str(p) for p in self.caps.collect("extension_paths")]  # e.g. OpenClaw plugin entries
         paths = res.discover_extensions(self.cwd, self.agent_dir, self.trusted, self.settings, extra, plugin_dir)
         if not paths:
             return

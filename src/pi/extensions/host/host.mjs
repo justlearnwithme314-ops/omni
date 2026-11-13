@@ -459,8 +459,12 @@ async function loadOne(p) {
     }
     const mod = await import(pathToFileURL(p).href);
     const factory = mod.default ?? mod.extension ?? mod.activate;
-    if (typeof factory !== "function") throw new Error("extension has no default export factory");
-    await factory(makeAPI(ext));
+    if (factory && typeof factory === "object" && typeof factory.register === "function") {
+      await registerOpenClawPlugin(factory, ext, path.dirname(p));  // an OpenClaw plugin entry (definePluginEntry)
+    } else {
+      if (typeof factory !== "function") throw new Error("extension has no default export factory");
+      await factory(makeAPI(ext));
+    }
     ext.ok = true;
   } catch (e) {
     ext.error = e?.stack?.split("\n").slice(0, 3).join(" | ") || String(e);
@@ -471,6 +475,87 @@ async function loadOne(p) {
     ext.loadMs = Math.round(performance.now() - t0);
   }
 }
+// ---------------------------------------------------------------------------------------------- OpenClaw plugins
+// OpenClaw's agent tools have Pi's tool shape, so a plugin's tools, commands and core hooks map straight onto the Pi
+// API. Registrations this core has no slot for (channels, providers, services, gateway methods, ...) are recorded as
+// "not yet supported" instead of failing the plugin.
+const OPENCLAW_HOOKS = {
+  before_tool_call(pi, handler) {
+    pi.on("tool_call", async (e) => {
+      const r = await handler({ toolName: e.toolName, params: e.input, toolCallId: e.toolCallId }, {});
+      if (r?.block) return { block: true, reason: r.blockReason || r.reason || `${e.toolName} blocked by a plugin` };
+      if (r?.params && typeof r.params === "object") Object.assign(e.input, r.params);
+      return undefined;
+    });
+  },
+  after_tool_call(pi, handler) {
+    pi.on("tool_result", async (e) => { await handler({ toolName: e.toolName, params: e.input, result: e.content, isError: e.isError, toolCallId: e.toolCallId }, {}); });
+  },
+  before_prompt_build(pi, handler) {
+    pi.on("before_agent_start", async (e) => {
+      const r = await handler({ prompt: e.prompt, messages: [] }, {});
+      if (!r) return undefined;
+      let sp = r.systemPrompt || e.systemPrompt;
+      if (r.prependSystemContext) sp = `${r.prependSystemContext}\n\n${sp}`;
+      for (const extra of [r.appendSystemContext, r.prependContext]) if (extra) sp = `${sp}\n\n${extra}`;
+      return sp !== e.systemPrompt ? { systemPrompt: sp } : undefined;
+    });
+  },
+  agent_end(pi, handler) { pi.on("agent_end", async (e) => { await handler({ messages: e.messages || [], success: e.outcome !== "error" }, {}); }); },
+  session_start(pi, handler) { pi.on("session_start", async () => { await handler({ sessionId: state.sessionId }, {}); }); },
+  session_end(pi, handler) { pi.on("session_shutdown", async () => { await handler({ sessionId: state.sessionId }, {}); }); },
+  message_received(pi, handler) { pi.on("input", async (e) => { await handler({ content: e.text, from: "user" }, { channelId: "cli" }); return { action: "continue" }; }); },
+};
+OPENCLAW_HOOKS.before_agent_start = OPENCLAW_HOOKS.before_prompt_build;
+OPENCLAW_HOOKS.tool_result = OPENCLAW_HOOKS.after_tool_call;
+
+async function registerOpenClawPlugin(entry, ext, dir) {
+  const pi = makeAPI(ext);
+  ext.kind = "openclaw";
+  if (entry.id || entry.name) ext.name = String(entry.id || entry.name);
+  if (entry.__openclawEntry === "channel") ext.missing.add("openclaw.channel (messaging channels need the gateway)");
+  const toolContext = { config: {}, workspaceDir: state.cwd, agentDir: state.agentDir, sandboxed: false };
+  const base = {
+    id: ext.name, name: entry.name || ext.name, source: dir, config: {}, pluginConfig: {},
+    logger: { info: toErr, warn: toErr, error: toErr, debug() {} },
+    resolvePath: (p) => path.resolve(dir, p),
+    registerTool(tool, _opts) {
+      const made = typeof tool === "function" ? tool(toolContext) : tool;
+      const add = (t) => {
+        if (!t || typeof t.execute !== "function" || !t.name) return;
+        pi.registerTool({ name: t.name, label: t.label || t.name, description: t.description || "", parameters: t.parameters || { type: "object", properties: {} },
+          execute: (id, params, signal, onUpdate) => t.execute(id, params, signal, onUpdate) });
+      };
+      if (made && typeof made.then === "function") return made.then((v) => [].concat(v || []).forEach(add));
+      [].concat(made || []).forEach(add);
+      return undefined;
+    },
+    registerCommand(def) {
+      if (!def?.name || typeof def.handler !== "function") return;
+      pi.registerCommand(String(def.name).replace(/^\//, ""), { description: def.description || "", handler: async (args, ctx) => {
+        const r = await def.handler({ args, commandBody: args, channel: "cli", isAuthorizedSender: true, config: {} });
+        const text = typeof r === "string" ? r : r?.text;
+        if (text) ctx.ui.notify(String(text), "info");
+      } });
+    },
+    on(name, handler) {
+      const map = OPENCLAW_HOOKS[name];
+      if (map && typeof handler === "function") map(pi, handler);
+      else ext.missing.add(`openclaw.on:${name}`);
+    },
+    registerHook(names, handler) { for (const n of [].concat(names || [])) base.on(n, handler); },
+  };
+  const api = new Proxy(base, {
+    get(t, prop) {
+      if (prop in t || typeof prop === "symbol") return t[prop];
+      if (String(prop).startsWith("register")) return () => { ext.missing.add(`openclaw.${String(prop)}`); };
+      if (prop === "runtime") return new Proxy({}, { get: (_r, k) => (typeof k === "symbol" ? undefined : () => { ext.missing.add(`openclaw.runtime.${String(k)}`); }) });
+      return undefined;
+    },
+  });
+  await entry.register(api);
+}
+
 const extReport = () => extensions.map((e) => ({ path: e.path, name: e.name, ok: e.ok, error: e.error, tools: [...e.tools], commands: [...e.commands], events: [...e.events], missing: [...e.missing],
   loadMs: e.loadMs, handlerMs: Object.fromEntries(Object.entries(e.handlerMs).map(([k, v]) => [k, Math.round(v)])) }));
 

@@ -12,6 +12,7 @@
     "plan",
     "ast",
     "web-search",
-    "claude-compat"
+    "claude-compat",
+    "diagnostics"
   ]
 }

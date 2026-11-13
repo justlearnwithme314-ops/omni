@@ -8,7 +8,8 @@
     "ask",
     "fetch",
     "web-search",
-    "hermes-plugins"
+    "hermes-plugins",
+    "diagnostics"
   ],
   "omni_registry": {
     "enabled": true,

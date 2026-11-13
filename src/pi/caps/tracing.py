@@ -124,6 +124,26 @@ class Tracer:
         if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY"):
             threading.Thread(target=self.export, args=(tr,), daemon=True, name="omni-langfuse").start()
 
+    def score(self, value: float, comment: str = "") -> Optional[Dict[str, Any]]:
+        """Attach a user rating to the last run (Langfuse scores): saved locally and exported when configured."""
+        tr = self.last
+        if tr is None:
+            return None
+        score = {"id": uuid.uuid4().hex, "type": "score", "traceId": tr["id"], "name": "user-feedback", "value": value,
+                 "comment": comment, "at": time.time()}
+        tr.setdefault("scores", []).append(score)
+        try:
+            with open(Path(self.session.agent_dir) / "traces" / f"{tr['sessionId']}.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(score, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+        if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY"):
+            batch = [{"id": uuid.uuid4().hex, "type": "score-create", "timestamp": _iso(score["at"]),
+                      "body": {"id": score["id"], "traceId": tr["id"], "name": "user-feedback", "value": value,
+                               "comment": comment or None, "dataType": "NUMERIC"}}]
+            threading.Thread(target=self.post, args=(batch,), daemon=True, name="omni-langfuse").start()
+        return score
+
     # --- Langfuse
     def langfuse_batch(self, tr: Dict[str, Any]) -> List[Dict[str, Any]]:
         def ev(kind: str, ts: float, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -149,9 +169,12 @@ class Tracer:
         return batch
 
     def export(self, tr: Dict[str, Any]) -> bool:
+        return self.post(self.langfuse_batch(tr))
+
+    def post(self, batch: List[Dict[str, Any]]) -> bool:
         host = (os.environ.get("LANGFUSE_HOST") or os.environ.get("LANGFUSE_BASE_URL") or DEFAULT_HOST).rstrip("/")
         auth = base64.b64encode(f"{os.environ['LANGFUSE_PUBLIC_KEY']}:{os.environ['LANGFUSE_SECRET_KEY']}".encode()).decode()
-        req = urllib.request.Request(host + "/api/public/ingestion", data=json.dumps({"batch": self.langfuse_batch(tr)}).encode(),
+        req = urllib.request.Request(host + "/api/public/ingestion", data=json.dumps({"batch": batch}).encode(),
                                      headers={"Content-Type": "application/json", "Authorization": f"Basic {auth}"}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=15) as r:
@@ -206,7 +229,19 @@ def _commands(session: Any) -> Dict[str, Any]:
         export = "Langfuse export on" if os.environ.get("LANGFUSE_PUBLIC_KEY") and os.environ.get("LANGFUSE_SECRET_KEY") else \
             "Langfuse export off (set LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY)"
         return format_trace(tr.last if tr else None) + f"\n{where} · {export}"
-    return {"trace": ("Show where the last run's time, tokens and cost went", run)}
+    def rate(args: str) -> str:
+        tr = tracer_of(session)
+        word, _, comment = args.strip().partition(" ")
+        values = {"up": 1.0, "good": 1.0, "+": 1.0, "down": 0.0, "bad": 0.0, "-": 0.0}
+        try:
+            value = values[word.lower()] if word.lower() in values else float(word)
+        except ValueError:
+            return "Usage: /rate up|down|<number> [comment]"
+        if tr is None or tr.score(value, comment.strip()) is None:
+            return "No run to rate yet."
+        return f"Rated the last run {value:g}" + (f" ({comment.strip()})" if comment.strip() else "") + "."
+    return {"trace": ("Show where the last run's time, tokens and cost went", run),
+            "rate": ("Rate the last run (up / down / a number), with an optional comment", rate)}
 
 
 CAPABILITIES = [Capability("tracing", "Tracing", "Record every run as a trace (model calls, tool calls, tokens, cost, "

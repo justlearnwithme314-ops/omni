@@ -65,6 +65,19 @@ Hosts for other people's code (also capabilities):
 | `claude-compat` | Claude Code's slash commands (`~/.claude/commands`, the project's `.claude/commands`), the project's `.mcp.json`, and Claude Code plugins (a folder with `.claude-plugin/plugin.json`: its `commands/`, `agents/`, `skills/`, `hooks/hooks.json`, `.mcp.json`). `/plugins` lists them. Your own prompts, skills and `mcp.json` win on a name clash |
 | `scheduler` | `cronjob` tool, `/cron`, `omni cron list / run / remove`. Jobs (`every 2h`, cron expressions, `in 20m`, ISO times) run a prompt in a fresh unattended session and save the answer under `<agent-dir>/cron/output`. An open session checks every 30 s; `omni cron run` is for Task Scheduler / crontab |
 
+| `openclaw-plugins` | OpenClaw plugins (`openclaw.plugin.json` + `definePluginEntry`) in the Node extension host: their tools, commands and the hooks `before_tool_call`, `after_tool_call`, `before_prompt_build`, `agent_end`, `session_start` / `session_end`. Channels, providers, services and gateway methods are accepted and listed as not supported yet. `/openclaw` shows what loaded. Tested with a plugin written for the test, not with OpenClaw's bundled plugins |
+
+More feature modules:
+
+| id | What it does | Follows |
+|---|---|---|
+| `diagnostics` | After each `write` / `edit`, a syntax check of the file (Python, JSON, TOML, YAML, JavaScript via `node --check`); problems are appended to the same tool result | Oh My Pi LSP feedback |
+| `memory-reflect` | `/reflect`: one extra model call distils the conversation into core memory and the archive. `"memory": {"reflect_on_exit": true}` runs it when a longer session ends. Needs `memory` | Letta sleep-time agent, Oh My Pi `reflect`, Hermes nudges |
+
+`tracing` also has `/rate up|down|<number> [comment]` (a Langfuse score on the last run), and `browser` has a `screenshot` action that returns an image.
+
+A module can declare `requires`. One whose requirement is off is reported in `/capabilities` and `/doctor` with the command that fixes it; the profile wizard adds requirements, and removes dependents, for you.
+
 Host switches (same commands, they flip profile keys):
 
 | id | Controls |
@@ -142,6 +155,22 @@ Not taken over: Temporal's server, workers and multi-language SDKs; Letta's agen
 vector search; Browser Use's vision mode and cloud browsers; Daytona's snapshots, remote workspaces and API;
 Langfuse's prompt management, evaluations and dashboards.
 
+## Gateway: Omni from chat apps
+
+`omni gateway` is a long-running frontend (OpenClaw's gateway, Hermes' messaging platforms). Each conversation gets
+its own session and session file, so context survives restarts and chats never mix.
+
+```json
+{ "profile": "assistant", "cwd": "D:/work/notes",
+  "channels": { "telegram": {"token": "$TELEGRAM_BOT_TOKEN", "allow": [123456789]},
+                "http":     {"port": 18790, "token": "choose-a-secret"} } }
+```
+
+That is `<agent-dir>/gateway.json`. Only senders in `allow` are answered; anyone else gets a one-time pairing code
+and `omni gateway approve <code>` lets them in. The HTTP channel (`POST /message {"chat", "text"}` with a bearer
+token) listens on 127.0.0.1 only. In a chat: `/new`, `/status`, `/stop`. More channels can be added from Python
+with `gateway.register_channel(name, factory)`. `omni gateway status` shows the configuration.
+
 ## Startup time and health
 
 - The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.
@@ -186,7 +215,7 @@ Done means covered by an offline test in `tests/`.
 | **Pi** | core loop, 7 tools, sessions, TUI, extensions host, MCP, packages, codemode, OAuth sign-ins (see `PI_PROFILE.md`) | keybindings.json, sixel images |
 | **Oh My Pi** | extensions load through the same host; `todo`, `task`, `ask`, `fetch`, `checkpoint` / `rewind`, plan mode, `ast_grep` / `ast_edit` (via the CLI), hashline edits (ranges, inserts, cut/paste registers, create / delete / move), `web_search`, named agents for `task`; OAuth flows ported | hashline syntax-block ops (`N*`), `lsp`, `github`, `eval`, model roles, TTSR, snapcompact, the remaining slash commands, its extra extension API |
 | **Hermes** | `memory` (file-compatible), `todo`, `delegate_task` equivalent, `skill_manage`, `session_search`, `web_search`, skill gating by `platforms`; plugin host with tools, commands, prompt sections and the eight core hooks | the other plugin kinds (memory providers, context engines, platforms, image / video generation), streaming and API-request hooks, messaging platforms, cron delivery to chat channels, self-evolution job |
-| **OpenClaw** | skills with `metadata.openclaw` gating; plugins through the legacy adapter | `openclaw.plugin.json` + plugin SDK host, gateway daemon, channels, exec approvals, nodes, ACP |
+| **OpenClaw** | skills with `metadata.openclaw` gating; plugins through the legacy adapter | the rest of the plugin SDK (channel, provider and service plugins), more gateway channels, exec approvals, nodes, ACP |
 
 The order for the remaining work is in `INTEGRATION_PLAN.md` (phases 3-5).
 
