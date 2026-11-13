@@ -198,6 +198,30 @@ class PluginContext:
 
     post_message = inject_message
 
+    def register_memory_provider(self, provider: Any) -> None:
+        """A Hermes MemoryProvider (honcho, mem0, ...): one external provider at a time, like Hermes."""
+        host = self._host
+        if host.memory_provider is not None:
+            self.record["unsupported"].append("memory_provider (another one is already active)")
+            return
+        try:
+            if not provider.is_available():
+                reason = getattr(provider, "unavailable_reason", lambda: "")() or "not available"
+                self.record["unsupported"].append(f"memory_provider ({reason})")
+                return
+        except Exception as e:
+            self.record["unsupported"].append(f"memory_provider ({type(e).__name__}: {e})")
+            return
+        host.memory_provider = provider
+        self.record["memory_provider"] = str(getattr(provider, "name", "") if not callable(getattr(provider, "name", None)) else provider.name())
+        for schema in provider.get_tool_schemas() or []:
+            fn_schema = schema.get("function") if isinstance(schema.get("function"), dict) else schema
+            name = fn_schema.get("name")
+            if name:
+                host.add_tool(self, name, "memory", fn_schema,
+                              lambda args, _n=name, **kw: (host.ensure_memory_ready(), provider.handle_tool_call(_n, args, **kw))[1], "")
+                self.record["tools"].append(name)
+
     def __getattr__(self, name: str) -> Any:
         if name.startswith("register_"):  # a plugin kind this core has no slot for yet: accept, record, carry on
             def stub(*_a: Any, **_k: Any) -> None:
@@ -217,6 +241,9 @@ class HermesHost:
         self._contexts: List[PluginContext] = []
         self._unsubscribe: Optional[Callable[[], None]] = None
         self._last_user = ""
+        self.memory_provider: Any = None
+        self._memory_ready = False
+        self._turns = 0
 
     # --- config store
     def _config_path(self) -> Path:
@@ -288,12 +315,31 @@ class HermesHost:
                   model=(self.session.model or {}).get("id"), platform="cli")
         if self._unsubscribe:
             self._unsubscribe()
+        if self.memory_provider is not None:
+            for call in (lambda: self.memory_provider.on_session_end(
+                    [e["message"] for e in self.session.sessions.get_branch() if e.get("type") == "message"]),
+                    lambda: self.memory_provider.shutdown()):
+                try:
+                    call()
+                except Exception:
+                    pass
         for ctx in self._contexts:
             for cb in ctx._unload:
                 try:
                     cb()
                 except Exception:
                     pass
+
+    def ensure_memory_ready(self) -> None:
+        """Initialise the memory provider once the session exists (plugins register before it is opened)."""
+        if self.memory_provider is None or self._memory_ready:
+            return
+        self._memory_ready = True
+        s = self.session
+        try:
+            self.memory_provider.initialize(s.sessions.session_id, hermes_home=str(s.agent_dir), platform="cli", agent_context="primary")
+        except Exception as e:
+            s.diagnostics.append(f"hermes memory provider: initialize failed: {type(e).__name__}: {e}")
 
     # --- tools
     def add_tool(self, ctx: PluginContext, name: str, toolset: str, schema: Dict[str, Any], handler: Callable, description: str) -> None:
@@ -368,15 +414,32 @@ class HermesHost:
             ctx_text = r.get("context") if isinstance(r, dict) else r if isinstance(r, str) else None
             if ctx_text:
                 parts.append(str(ctx_text))
+        if self.memory_provider is not None:  # recall for this message, as Hermes does before each turn
+            self.ensure_memory_ready()
+            self._turns += 1
+            try:
+                self.memory_provider.on_turn_start(self._turns, text)
+                recalled = self.memory_provider.prefetch(text, session_id=s.sessions.session_id)
+                if recalled:
+                    parts.append(str(recalled)[:PROMPT_SECTION_MAX])
+            except Exception as e:
+                s.diagnostics.append(f"hermes memory provider: {type(e).__name__}: {e}")
         return "\n\n".join(parts) or None
 
     def _on_event(self, ev: Dict[str, Any]) -> None:
-        if ev.get("type") != "agent_end" or "post_llm_call" not in self.hooks:
+        if ev.get("type") == "session_start":
+            self.ensure_memory_ready()
+        if ev.get("type") != "agent_end" or ("post_llm_call" not in self.hooks and self.memory_provider is None):
             return
         s = self.session
         history = [e["message"] for e in s.sessions.get_branch() if e.get("type") == "message"]
         last = next((m for m in reversed(history) if m.get("role") == "assistant"), None)
         reply = "".join(b.get("text", "") for b in (last or {}).get("content") or [] if b.get("type") == "text")
+        if self.memory_provider is not None and self._last_user:
+            try:
+                _call(self.memory_provider.sync_turn, self._last_user, reply, session_id=s.sessions.session_id)
+            except Exception as e:
+                s.diagnostics.append(f"hermes memory provider sync: {type(e).__name__}: {e}")
         self.fire("post_llm_call", user_message=self._last_user, assistant_response=reply, conversation_history=history,
                   model=(s.model or {}).get("id"), platform="cli", **self._ids())
 
@@ -390,7 +453,73 @@ class HermesHost:
                 continue
             if text:
                 out.append(str(text)[:limit])
+        if self.memory_provider is not None:
+            try:
+                block = self.memory_provider.system_prompt_block()
+                if block:
+                    out.append(str(block)[:PROMPT_SECTION_MAX])
+            except Exception:
+                pass
         return "\n\n".join(out)
+
+
+def install_hermes_shims() -> None:
+    """Hermes plugins import base classes from Hermes itself (`from agent.memory_provider import MemoryProvider`).
+    When Hermes is not installed, provide those names so the plugin module can be imported."""
+    import types
+    if "agent.memory_provider" in sys.modules:
+        return
+    try:
+        importlib.import_module("agent.memory_provider")
+        return
+    except Exception:
+        pass
+
+    class MemoryProvider:  # the parts of Hermes' ABC a provider relies on having defaults for
+        def is_available(self) -> bool:
+            return True
+
+        def initialize(self, session_id: str, **kwargs: Any) -> None:
+            pass
+
+        def unavailable_reason(self) -> str:
+            return ""
+
+        def system_prompt_block(self) -> str:
+            return ""
+
+        def prefetch(self, query: str, *, session_id: str = "") -> str:
+            return ""
+
+        def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
+            pass
+
+        def sync_turn(self, user_content: str, assistant_content: str, **kwargs: Any) -> None:
+            pass
+
+        def get_tool_schemas(self) -> list:
+            return []
+
+        def handle_tool_call(self, tool_name: str, args: dict, **kwargs: Any) -> str:
+            return json.dumps({"error": f"unknown tool {tool_name}"})
+
+        def on_turn_start(self, turn_number: int, message: str, **kwargs: Any) -> None:
+            pass
+
+        def on_session_end(self, messages: list) -> None:
+            pass
+
+        def shutdown(self) -> None:
+            pass
+
+    pkg = sys.modules.get("agent") or types.ModuleType("agent")
+    if not hasattr(pkg, "__path__"):
+        pkg.__path__ = []  # type: ignore[attr-defined]
+    mod = types.ModuleType("agent.memory_provider")
+    mod.MemoryProvider = MemoryProvider  # type: ignore[attr-defined]
+    sys.modules.setdefault("agent", pkg)
+    sys.modules["agent.memory_provider"] = mod
+    pkg.memory_provider = mod  # type: ignore[attr-defined]
 
 
 def host_of(session: Any) -> Optional[HermesHost]:
@@ -400,6 +529,7 @@ def host_of(session: Any) -> Optional[HermesHost]:
 def _tools(session: Any) -> Dict[str, ToolDef]:
     host = HermesHost(session)
     session._hermes_host = host
+    install_hermes_shims()
     host.load()
     return host.tools
 

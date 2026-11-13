@@ -17,6 +17,7 @@ third-party Python can call `register()` from an Omni plugin.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,11 +58,12 @@ class Capability:
     is_on: Optional[Callable[[Dict[str, Any]], bool]] = None            # switch-type: read state from a profile
     group: str = "feature"                                              # feature | host
     requires: List[str] = field(default_factory=list)                   # capability ids this one builds on
+    origin: str = "builtin"                                             # "builtin" or the file a user module came from
 
 
 CAPABILITIES: Dict[str, Capability] = {}
 _BUILTIN_MODULES = ["todo", "ask", "fetch", "memory", "task", "skills", "checkpoint", "hashline", "ast", "plan", "search",
-                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "openclaw_plugins", "diagnostics", "reflect", "hosts"]
+                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "openclaw_plugins", "diagnostics", "reflect", "approvals", "code_exec", "hosts"]
 _loaded = False
 
 
@@ -83,6 +85,59 @@ def load_builtin() -> Dict[str, Capability]:
             for cap in getattr(mod, "CAPABILITIES", []):
                 CAPABILITIES.setdefault(cap.id, cap)
     return CAPABILITIES
+
+
+USER_ERRORS: Dict[str, str] = {}   # module file -> why it did not load
+_user_seen: Dict[str, float] = {}  # module file -> mtime it was loaded at
+
+
+def user_capability_dirs(agent_dir: Path, cwd: Optional[str] = None, trusted: bool = False) -> List[Path]:
+    dirs = [Path(agent_dir) / "capabilities"]
+    if cwd and trusted:
+        dirs.append(Path(cwd) / ".omni" / "capabilities")
+    return dirs
+
+
+def load_user(agent_dir: Path, cwd: Optional[str] = None, trusted: bool = False) -> List[str]:
+    """Load capability modules you wrote yourself: `<agent-dir>/capabilities/*.py` and, in trusted projects,
+    `.omni/capabilities/*.py`. A module defines `CAPABILITIES = [Capability(...)]` exactly like the built-in ones.
+    Built-in ids cannot be replaced. Returns the ids loaded (or refreshed) by this call."""
+    load_builtin()
+    loaded: List[str] = []
+    for d in user_capability_dirs(agent_dir, cwd, trusted):
+        if not d.is_dir():
+            continue
+        for f in sorted(d.glob("*.py")):
+            if f.name.startswith("_"):
+                continue
+            key = str(f)
+            try:
+                mtime = f.stat().st_mtime
+            except OSError:
+                continue
+            if _user_seen.get(key) == mtime:
+                continue
+            _user_seen[key] = mtime
+            USER_ERRORS.pop(key, None)
+            try:
+                spec = importlib.util.spec_from_file_location(f"omni_user_capability_{f.stem}_{abs(hash(key)) % 10 ** 8}", f)
+                mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+                spec.loader.exec_module(mod)  # type: ignore[union-attr]
+                found = [c for c in getattr(mod, "CAPABILITIES", []) if isinstance(c, Capability)]
+                if not found:
+                    raise ValueError("the module defines no CAPABILITIES list")
+            except Exception as e:
+                USER_ERRORS[key] = f"{type(e).__name__}: {e}"
+                continue
+            for cap in found:
+                existing = CAPABILITIES.get(cap.id)
+                if existing is not None and existing.origin == "builtin":
+                    USER_ERRORS[key] = f"'{cap.id}' is a built-in capability id; pick another id"
+                    continue
+                cap.origin = key
+                CAPABILITIES[cap.id] = cap
+                loaded.append(cap.id)
+    return loaded
 
 
 # ------------------------------------------------------------------------------------------- resolution
@@ -164,6 +219,7 @@ class CapabilityManager:
         return cap_id in self.enabled
 
     def load(self) -> None:
+        load_user(self.session.agent_dir, self.session.cwd, bool(getattr(self.session, "trusted", False)))
         caps = load_builtin()
         s = self.session
         self.unload()  # hosts started by a previous load (plugin processes, listeners) go first
@@ -198,6 +254,10 @@ class CapabilityManager:
                 self.owner[name] = cid
             if text:
                 self._prompts[cid] = text.strip()
+        for path, why in USER_ERRORS.items():
+            note = f"capability module {path}: {why}"
+            if note not in s.diagnostics:
+                s.diagnostics.append(note)
         for cid, why in self.problems.items():
             if cid not in quiet:
                 s.diagnostics.append(f"capability '{cid}' not loaded: {why}")
@@ -324,7 +384,7 @@ class CapabilityManager:
             out.append({"id": cid, "title": cap.title, "description": cap.description, "inspired_by": cap.inspired_by,
                         "group": cap.group, "on": on, "tokens": self.cost(cid) if on and cap.apply is None else 0,
                         "tools": sorted(n for n, o in self.owner.items() if o == cid),
-                        "problem": self.problems.get(cid), "overridden": cid in overlay})
+                        "problem": self.problems.get(cid), "overridden": cid in overlay, "origin": cap.origin})
         return out
 
     def toggle(self, cap_id: str, on: Optional[bool] = None) -> bool:

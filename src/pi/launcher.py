@@ -14,6 +14,7 @@ Imports nothing heavy.
 """
 from __future__ import annotations
 
+import json
 import sys
 from typing import List, Optional
 
@@ -75,6 +76,46 @@ def profile_command(argv: List[str]) -> bool:
         print("\n  omni profile <name>   switch      ·   omni --profile <name>   one run only\n")
         return True
     from .profiles import canonical
+    if argv[1] in ("new", "show", "delete") and len(argv) > 2:
+        from .caps import load_builtin, load_user, merge_capability_lists
+        from .profiles import delete_profile, describe_profile, load_profile, save_profile
+        from . import resources as res
+        load_user(res.agent_dir())
+        try:
+            if argv[1] == "show":
+                print("\n".join(describe_profile(canonical(argv[2]))))
+            elif argv[1] == "delete":
+                delete_profile(argv[2])
+                print(f"  ✓ deleted {argv[2].lower()}")
+            else:  # omni profile new <name> [--from base] [--add a,b] [--remove c,d]
+                opts = {"--from": "core", "--add": "", "--remove": ""}
+                rest = argv[3:]
+                for i in range(0, len(rest) - 1, 2):
+                    if rest[i] not in opts:
+                        raise ValueError(f"unknown option {rest[i]} (use --from, --add, --remove)")
+                    opts[rest[i]] = rest[i + 1]
+                base = canonical(opts["--from"])
+                if base not in profiles:
+                    raise ValueError(f"unknown base profile '{opts['--from']}'")
+                known = load_builtin()
+                edits = ["+" + c for c in opts["--add"].split(",") if c.strip()] + ["-" + c for c in opts["--remove"].split(",") if c.strip()]
+                unknown = [e[1:] for e in edits if e[1:].strip() not in known]
+                if unknown:
+                    raise ValueError(f"unknown capability: {', '.join(unknown)}. Available: {', '.join(sorted(known))}")
+                switches = {e[1:].strip(): e[0] == "+" for e in edits if known[e[1:].strip()].is_on is not None}
+                features = [e[0] + e[1:].strip() for e in edits if known[e[1:].strip()].is_on is None]
+                base_prof = load_profile(base)
+                caps_list = merge_capability_lists(list(base_prof.get("capabilities") or []), features) if features else list(base_prof.get("capabilities") or [])
+                scratch = json.loads(json.dumps(base_prof))
+                for cid, on in switches.items():
+                    known[cid].apply(scratch, on)
+                extra = {k: v for k, v in scratch.items() if k not in ("capabilities", "name", "description")
+                         and json.dumps(v, sort_keys=True) != json.dumps(base_prof.get(k), sort_keys=True)}
+                path = save_profile(argv[2], base, caps_list, f"Custom: {base} with {len(caps_list)} module(s).", extra)
+                print(f"  ✓ saved {argv[2].lower()} ({len(caps_list)} modules, based on {base}) -> {path}\n    use it: omni profile {argv[2].lower()}")
+        except ValueError as e:
+            print(f"  ✗ {e}")
+        return True
     name = canonical(argv[1])
     if name not in profiles:
         return False  # maybe a legacy command profile; let the old CLI handle it

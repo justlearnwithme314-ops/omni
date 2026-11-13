@@ -220,7 +220,7 @@ class TestProfiles(PiTestCase):
         names = [p["name"] for p in list_profiles()]
         self.assertEqual(names[:5], ["core", "lean", "coder", "assistant", "balanced"])
         bal = load_profile("balanced")
-        self.assertTrue(bal["permission_gate"] and bal["omni_registry"]["enabled"])
+        self.assertTrue("approvals" in bal["capabilities"] and bal["omni_registry"]["enabled"])
         self.assertEqual(bal["tools"], "read,bash,edit,write,grep,find,ls")  # inherited from lean
         self.assertEqual(load_profile("nonsense")["name"], "core")
         self.assertEqual([load_profile(a)["name"] for a in ("pi", "omp", "hermes", "openclaw")],

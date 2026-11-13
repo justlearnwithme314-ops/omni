@@ -908,7 +908,7 @@ class Commands:
                 state = "[x]" if r["on"] else "[ ]"
                 cost = f"~{r['tokens']} tok" if r["tokens"] else ("" if r["group"] == "host" or not r["on"] else "0 tok")
                 note = f" · not loaded: {r['problem']}" if r["problem"] else ""
-                mine = " · your override" if r["overridden"] else ""
+                mine = (" · your override" if r["overridden"] else "") + (" · your module" if r.get("origin", "builtin") != "builtin" else "")
                 labels.append(f"{state} {r['id']:<19} {r['title']} — {r['description']}" +
                               (f"  ({cost})" if cost else "") + mine + note)
             labels.append("✓ done")

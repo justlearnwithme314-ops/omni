@@ -13,6 +13,8 @@
     "ast",
     "web-search",
     "claude-compat",
-    "diagnostics"
+    "diagnostics",
+    "approvals",
+    "code-exec"
   ]
 }
