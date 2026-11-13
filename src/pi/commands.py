@@ -839,8 +839,26 @@ class Commands:
                 switches[c.id] = not switches[c.id]
             elif c.id in chosen:
                 chosen.remove(c.id)
+                dependents = [d.id for d in caps.values() if c.id in d.requires and d.id in chosen]
+                for d in dependents:  # modules that build on this one go with it
+                    chosen.remove(d)
+                if dependents:
+                    self.port.notify(f"Also removed {', '.join(dependents)} (needs {c.id}).", "info")
             else:
                 chosen.append(c.id)
+                added = []
+                for r in c.requires:  # bring in what it builds on
+                    rc = caps.get(r)
+                    if rc is None:
+                        continue
+                    if rc.is_on is not None and not switches[r]:
+                        switches[r] = True
+                        added.append(r)
+                    elif rc.is_on is None and r not in chosen:
+                        chosen.append(r)
+                        added.append(r)
+                if added:
+                    self.port.notify(f"Also turned on {', '.join(added)} (needed by {c.id}).", "info")
         if not edit:
             name = (name or self.port.input("New profile — 3/3: name", placeholder="my-setup") or "").strip()
             if not name:

@@ -78,6 +78,8 @@ omni --capabilities todo,ask  exact module list for one run
 omni run "prompt"             one-shot answer
 omni install npm:<pkg>        Pi packages (also git:/local; remove / update / list)
 omni mcp add <name> ...       MCP servers (remove / list / login / logout; /mcp inside the window)
+omni gateway                  answer from chat apps (Telegram, HTTP); `approve <code>` pairs a sender
+omni cron list | run          scheduled jobs
 omni login <provider>         subscription sign-in: anthropic, google-antigravity, openai-codex, github-copilot
 omni legacy                   the previous REPL; subcommands like `omni models` still use the previous CLI
 ```

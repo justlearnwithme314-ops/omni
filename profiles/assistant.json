@@ -18,7 +18,9 @@
     "tracing",
     "durable",
     "scheduler",
-    "claude-compat"
+    "claude-compat",
+    "memory-reflect",
+    "diagnostics"
   ],
   "skills_budget_chars": 8000
 }

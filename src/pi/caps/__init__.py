@@ -40,6 +40,7 @@ class Capability:
     template_roots: Optional[Callable[[Any], List[Path]]] = None        # session -> extra prompt-template (slash command) folders
     agent_roots: Optional[Callable[[Any], List[Path]]] = None           # session -> extra named-agent folders (for `task`)
     hook_files: Optional[Callable[[Any], List[Any]]] = None             # session -> [(hooks file, plugin root or None)]
+    extension_paths: Optional[Callable[[Any], List[Path]]] = None       # session -> extra entries for the Node extension host
     mcp_files: Optional[Callable[[Any], List[Path]]] = None             # session -> extra MCP config files ({"mcpServers": ...})
     available: Optional[Callable[[Any], Optional[str]]] = None          # session -> why it cannot run here
     live_prompt: Optional[Callable[[Any], str]] = None                  # like `prompt`, but re-read every request
@@ -55,11 +56,12 @@ class Capability:
     apply: Optional[Callable[[Dict[str, Any], bool], None]] = None
     is_on: Optional[Callable[[Dict[str, Any]], bool]] = None            # switch-type: read state from a profile
     group: str = "feature"                                              # feature | host
+    requires: List[str] = field(default_factory=list)                   # capability ids this one builds on
 
 
 CAPABILITIES: Dict[str, Capability] = {}
 _BUILTIN_MODULES = ["todo", "ask", "fetch", "memory", "task", "skills", "checkpoint", "hashline", "ast", "plan", "search",
-                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "hosts"]
+                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "openclaw_plugins", "diagnostics", "reflect", "hosts"]
 _loaded = False
 
 
@@ -148,6 +150,13 @@ class CapabilityManager:
         self.problems: Dict[str, str] = {}   # capability id -> why it did not load
         self._prompts: Dict[str, str] = {}
 
+    def _wanted(self, cap_id: str) -> bool:
+        """Is this capability asked for by the profile (whether or not it has loaded yet)?"""
+        cap = load_builtin().get(cap_id)
+        if cap is not None and cap.is_on is not None:
+            return cap.is_on(self.session.profile)
+        return cap_id in (self.session.profile.get("capabilities") or [])
+
     def is_enabled(self, cap_id: str) -> bool:
         cap = load_builtin().get(cap_id)
         if cap is not None and cap.is_on is not None:
@@ -166,6 +175,12 @@ class CapabilityManager:
                 self.problems[cid] = "unknown capability"
                 continue
             why = cap.available(s) if cap.available else None
+            lacking = [r for r in cap.requires if not self._wanted(r)]
+            if lacking and not why:
+                why = f"needs {', '.join(lacking)} (turn it on with /capabilities {lacking[0]} on)"
+                quiet.discard(cid)
+                self.problems[cid] = why
+                continue
             if why:  # e.g. an external program is missing: shown in /capabilities, not worth a startup warning
                 self.problems[cid] = why
                 quiet.add(cid)

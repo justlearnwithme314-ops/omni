@@ -128,6 +128,10 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
     raw = sys.argv[1:] if argv is None else argv
     if profile_command(raw) or capability_command(raw):
         sys.exit(0)
+    if raw[:1] == ["gateway"] and (len(raw) == 1 or raw[1] in ("run", "status", "approve")):
+        from . import resources as res
+        from .gateway import cli as gateway_cli
+        hard_exit(gateway_cli(raw[1:], res.agent_dir()))
     if raw[:1] == ["cron"]:
         from . import resources as res
         from .caps.scheduler import cli as cron_cli

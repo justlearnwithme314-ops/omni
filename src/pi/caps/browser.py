@@ -205,6 +205,26 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
             rest = len(text) - offset - len(chunk)
             note = f"\n\n[{rest} more characters; call again with offset={offset + len(chunk)}]" if rest > 0 else ""
             return text_result((chunk or "(the page has no text)") + note, {"action": action, "totalChars": len(text)})
+        if action == "screenshot":
+            import base64
+            import os
+            import tempfile
+            path = os.path.join(tempfile.gettempdir(), f"omni-shot-{int(time.time() * 1000)}.png")
+            try:
+                saved = b.connect().capture_screenshot(path)
+                with open(saved or path, "rb") as f:
+                    data = base64.b64encode(f.read()).decode("ascii")
+            except ToolError:
+                raise
+            except Exception as e:
+                raise ToolError(f"browser: {type(e).__name__}: {e}") from None
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            return {"content": [{"type": "text", "text": "Screenshot of the current page."},
+                                {"type": "image", "data": data, "mimeType": "image/png"}], "details": {"action": action}}
         if action == "tabs":
             tabs = b.connect().list_tabs()
             return text_result("\n".join(f"{t.id[:8]}  {t.title[:60]}  {t.url[:100]}" for t in tabs) or "(no tabs)", {"action": action})
@@ -212,17 +232,17 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
             _unload(session)
             session._browser = Browser(session)
             return text_result("Browser connection closed.", {"action": action})
-        raise ToolError("action must be one of: open, state, click, type, select, scroll, back, text, tabs, close")
+        raise ToolError("action must be one of: open, state, click, type, select, scroll, back, text, screenshot, tabs, close")
 
     return {"browser": ToolDef(
         name="browser", label="Browser",
         description="Control a real web browser. Pages are shown as numbered interactive elements, e.g. "
                     "`[3]<button type=submit>Sign in</button>`; act on the number. Actions: open(url), state, "
                     "click(index), type(index, text, submit?), select(index, text), scroll(direction up|down), back, "
-                    "text(offset?) to read the page content, tabs, close. Every action returns the page's new state; "
+                    "text(offset?) to read the page content, screenshot (an image, for visual checks), tabs, close. Every action returns the page's new state; "
                     "indexes are valid only for the latest state.",
         parameters={"type": "object", "properties": {
-            "action": {"type": "string", "enum": ["open", "state", "click", "type", "select", "scroll", "back", "text", "tabs", "close"]},
+            "action": {"type": "string", "enum": ["open", "state", "click", "type", "select", "scroll", "back", "text", "screenshot", "tabs", "close"]},
             "url": {"type": "string"}, "index": {"type": "integer"}, "text": {"type": "string"},
             "submit": {"type": "boolean"}, "direction": {"type": "string"}, "offset": {"type": "integer"}},
             "required": ["action"]},

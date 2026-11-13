@@ -14,7 +14,9 @@
     "+tracing",
     "+durable",
     "+scheduler",
-    "+claude-compat"
+    "+claude-compat",
+    "+openclaw-plugins",
+    "+memory-reflect"
   ],
   "skills_budget_chars": 8000,
   "omni_registry": {

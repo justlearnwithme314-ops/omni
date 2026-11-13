@@ -22,8 +22,9 @@ const VIRTUAL = [
   [/^@(?:earendil-works|mariozechner|oh-my-pi)\/pi-tui(?:\/.*)?$/, "tui.mjs"],
   [/^@(?:earendil-works|mariozechner|oh-my-pi)\/pi-agent-core(?:\/.*)?$/, "agent-core.mjs"],
   [/^(?:typebox|@sinclair\/typebox)(?:\/.*)?$/, "typebox.mjs"],
+  [/^openclaw(?:\/plugin-sdk(?:\/.*)?)?$/, "openclaw-sdk.mjs"],
 ];
-export const VIRTUAL_RE = /^(?:@(?:earendil-works|mariozechner|oh-my-pi)\/pi-[a-z-]+(?:\/[^"']*)?|typebox(?:\/[^"']*)?|@sinclair\/typebox(?:\/[^"']*)?)$/;
+export const VIRTUAL_RE = /^(?:@(?:earendil-works|mariozechner|oh-my-pi)\/pi-[a-z-]+(?:\/[^"']*)?|typebox(?:\/[^"']*)?|@sinclair\/typebox(?:\/[^"']*)?|openclaw(?:\/plugin-sdk(?:\/[^"']*)?)?)$/;
 
 const FALLBACK_ROOTS = [
   process.env.OMNI_PI_NODE_MODULES,
@@ -108,7 +109,7 @@ function cached(file, compile) {
   let key;
   try {
     const st = statSync(file);
-    key = createHash("sha1").update(`${file}\0${st.mtimeMs}\0${st.size}\0v3`).digest("hex");
+    key = createHash("sha1").update(`${file}\0${st.mtimeMs}\0${st.size}\0v4`).digest("hex");
   } catch { return compile(); }
   const hit = path.join(CACHE_DIR, key + ".js");
   try { return readFileSync(hit, "utf8"); } catch {}
@@ -130,7 +131,7 @@ function withRequire(src) {
   if (/\b(?:const|let|var|function)\s+require\b|\bcreateRequire\b|import\s+require\b/.test(src)) return src;
   return REQUIRE_PRELUDE + src;
 }
-const VIRTUAL_MARK = /@(?:earendil-works|mariozechner|oh-my-pi)\/pi-|["'](?:@sinclair\/typebox|typebox)/;
+const VIRTUAL_MARK = /@(?:earendil-works|mariozechner|oh-my-pi)\/pi-|["'](?:@sinclair\/typebox|typebox|openclaw\/plugin-sdk)/;
 
 export async function load(url, context, nextLoad) {
   if (!url.startsWith("file:")) return nextLoad(url, context);
