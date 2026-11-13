@@ -177,6 +177,23 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
         from . import resources as res
         from .caps.scheduler import cli as cron_cli
         hard_exit(cron_cli(raw[1:] if raw[0] == "cron" else ["signal"] + raw[1:], res.agent_dir()))
+    if raw == ["doctor"]:  # the /doctor report without opening the window
+        import os
+        from . import resources as res
+        from .agent import AgentSession, SessionOptions
+        from .commands import Commands
+        from .modes import HeadlessUI
+        from .profiles import active_profile_name
+        s = AgentSession(SessionOptions(cwd=os.getcwd(), mode="print", no_session=True, profile=active_profile_name(),
+                                        agent_dir=str(res.agent_dir())), ui=HeadlessUI())
+        s.start()
+
+        class _Port:
+            def notify(self, *_a: object) -> None:
+                pass
+        print("\n".join(Commands(s, _Port()).doctor_lines()))
+        s.shutdown()
+        hard_exit(0)
     if raw[:1] == ["usage"]:
         from . import resources as res
         from .usage import cli as usage_cli

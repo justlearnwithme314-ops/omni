@@ -24,7 +24,8 @@
     "approvals",
     "code-exec",
     "self-evolve",
-    "code-nav"
+    "code-nav",
+    "rules"
   ],
   "skills_budget_chars": 8000
 }

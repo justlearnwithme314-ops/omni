@@ -12,7 +12,8 @@
     "diagnostics",
     "approvals",
     "code-exec",
-    "code-nav"
+    "code-nav",
+    "rules"
   ],
   "omni_registry": {
     "enabled": true,

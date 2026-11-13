@@ -198,6 +198,12 @@ with `gateway.register_channel(name, factory)`. `omni gateway status` shows the 
 - **Shared memory for subagents** (Letta shared blocks): with `memory` on, a `task` subagent reads the parent's core memory; it cannot change it.
 - **Browser**: `wait(text?, seconds?)` until text appears. **Sandbox**: `/sandbox snapshot [name]` saves the container as an image you can start from.
 
+## Rules
+
+`rules` (Oh My Pi's rules and time-travelling stream rules) reads markdown files from `<agent-dir>/rules/` and, in trusted projects, `.omni/rules/`, `.pi/rules/`, `.omp/rules/`. A rule with `alwaysApply: true` is in the prompt; a rule with a `condition` (a regular expression) is not in the prompt at all and is sent to the model as a correction when its reply or a tool call's arguments match, once per session; any other rule is listed by name and read on demand. `/rules` shows them and what fired. The check runs when the model's message is complete, not mid-stream as in Oh My Pi.
+
+The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url": "$SLACK_WEBHOOK_URL", "format": "slack" | "discord" | "json"}`) for delivering scheduled-job results, and `omni doctor` prints the `/doctor` report without opening the window.
+
 ## Startup time and health
 
 - The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.

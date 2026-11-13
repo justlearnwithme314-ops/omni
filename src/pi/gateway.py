@@ -205,7 +205,33 @@ class HttpChannel(Channel):
         self.server.server_close()
 
 
-CHANNEL_TYPES: Dict[str, Callable[[Dict[str, Any]], Channel]] = {"telegram": TelegramChannel, "http": HttpChannel}
+class WebhookChannel(Channel):
+    """Outbound only: post messages to an incoming-webhook URL (Slack, Discord, Teams, or your own endpoint).
+    Use it as a delivery target for scheduled jobs: `deliver: "alerts:any"` with a channel named `alerts`.
+
+        "alerts": {"type": "webhook", "url": "$SLACK_WEBHOOK_URL", "format": "slack" | "discord" | "json"}
+    """
+    name = "webhook"
+
+    def __init__(self, cfg: Dict[str, Any]):
+        self.url = resolve_secret(cfg.get("url"))
+        if not self.url.startswith(("http://", "https://")):
+            raise ValueError("webhook: url is missing or not an http(s) URL")
+        self.format = str(cfg.get("format") or ("discord" if "discord" in self.url else "slack"))
+
+    def poll(self, timeout: float) -> List[Inbound]:
+        time.sleep(min(timeout, 5.0))
+        return []
+
+    def send(self, chat: str, text: str) -> None:
+        body = {"content": text[:1900]} if self.format == "discord" else {"text": text} if self.format == "slack" else {"chat": chat, "text": text}
+        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            r.read()
+
+
+CHANNEL_TYPES: Dict[str, Callable[[Dict[str, Any]], Channel]] = {"telegram": TelegramChannel, "http": HttpChannel,
+                                                                "webhook": WebhookChannel}
 
 
 def register_channel(name: str, factory: Callable[[Dict[str, Any]], Channel]) -> None:
