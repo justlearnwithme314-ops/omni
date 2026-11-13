@@ -184,6 +184,13 @@ and `omni gateway approve <code>` lets them in. The HTTP channel (`POST /message
 token) listens on 127.0.0.1 only. In a chat: `/new`, `/status`, `/stop`. More channels can be added from Python
 with `gateway.register_channel(name, factory)`. `omni gateway status` shows the configuration.
 
+## Proactive and self-improving
+
+- **Heartbeats** (OpenClaw): a scheduled job created with `heartbeat: true` reads `HEARTBEAT.md` in its folder and stays silent (no file, no chat message) when the model answers `HEARTBEAT_OK`.
+- **Signals** (Temporal): a job with the schedule `on <name>` waits until `omni signal <name> [text]`, the `cronjob` tool (`action: signal`) or `POST /signal` on the gateway's HTTP channel sends that signal, then runs with the text added to its prompt. `on <name> repeat` runs on every signal.
+- **Self-evolution** (Hermes, `self-evolve`): `/evolve run` or `omni evolve run` studies recent sessions and proposes new skills, skill corrections and memory entries. Nothing is applied until `/evolve apply <id>`; a corrected skill keeps its previous text as `SKILL.md.bak`.
+- **Evaluations** (Langfuse): `omni eval cases.jsonl --profiles core,coder --models a,b` runs the same prompts under each variant and reports pass rate, tokens, cost and time. Cases are JSONL with `prompt` and an optional `expect` (text, `contains`, `not_contains`, `regex`, `tools`).
+
 ## Startup time and health
 
 - The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.

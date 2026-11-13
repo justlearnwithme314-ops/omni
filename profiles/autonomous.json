@@ -16,7 +16,8 @@
     "+scheduler",
     "+claude-compat",
     "+openclaw-plugins",
-    "+memory-reflect"
+    "+memory-reflect",
+    "+self-evolve"
   ],
   "skills_budget_chars": 8000,
   "omni_registry": {

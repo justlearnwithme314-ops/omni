@@ -132,6 +132,7 @@ class HttpChannel(Channel):
 
     def __init__(self, cfg: Dict[str, Any]):
         self.token = resolve_secret(cfg.get("token"))
+        self.agent_dir = Path(cfg.get("_agent_dir") or ".")
         if not self.token:
             raise ValueError("http: a token is required (requests must send it as a bearer token)")
         self.inbox: "queue.Queue[Inbound]" = queue.Queue()
@@ -153,10 +154,19 @@ class HttpChannel(Channel):
                 self._json(200, {"status": "ok", "app": "omni-gateway"}) if self.path == "/health" else self._json(404, {"error": "not found"})
 
             def do_POST(self) -> None:  # noqa: N802
-                if self.path != "/message":
+                if self.path not in ("/message", "/signal"):
                     return self._json(404, {"error": "not found"})
                 if not secrets.compare_digest(self.headers.get("Authorization", ""), f"Bearer {outer.token}"):
                     return self._json(401, {"error": "bad or missing bearer token"})
+                if self.path == "/signal":  # wake jobs waiting `on <name>` (webhooks, CI, other programs)
+                    try:
+                        n = int(self.headers.get("Content-Length") or 0)
+                        data = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
+                        from .caps.scheduler import send_signal
+                        waiting = send_signal(outer.agent_dir, str(data["name"]), str(data.get("payload") or ""))
+                    except (ValueError, KeyError, TypeError) as e:
+                        return self._json(400, {"error": f"body must be JSON with a valid `name`: {e}"})
+                    return self._json(200, {"queued": True, "waiting_jobs": waiting})
                 try:
                     n = int(self.headers.get("Content-Length") or 0)
                     data = json.loads(self.rfile.read(n).decode("utf-8")) if n else {}
@@ -246,7 +256,7 @@ class Gateway:
             if cfg.get("enabled") is False:
                 continue
             try:
-                self.channels[name] = factory(cfg)
+                self.channels[name] = factory(dict(cfg, _agent_dir=str(self.agent_dir)))
             except Exception as e:
                 self.errors.append(f"channel '{name}': {e}")
         self.conversations: Dict[str, Conversation] = {}
