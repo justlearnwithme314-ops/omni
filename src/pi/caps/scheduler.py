@@ -8,6 +8,16 @@ Schedules:   `every 30m` · `every 2h` · `every 1d`      interval
              `0 9 * * 1-5`                              cron (minute hour day month weekday; lists, ranges, steps)
              `in 20m` · `2026-11-14T09:00`              once
 
+Two special kinds:
+
+    heartbeat    (OpenClaw heartbeats) a recurring check that stays silent unless something needs you. The run reads
+                 `HEARTBEAT.md` in the job's folder if there is one, and when the model answers `HEARTBEAT_OK` nothing
+                 is saved or delivered. Create with `heartbeat: true`.
+    `on <name>`  (Temporal signals) a job that waits, for days if need be, until the signal arrives, then runs with
+                 the signal's text added to its prompt. Send one with `omni signal <name> [text]`, the `cronjob`
+                 tool (`action: signal`), or `POST /signal` on the gateway's HTTP channel. `on <name> repeat` runs
+                 on every signal instead of once.
+
 Who runs them: an open Omni session checks every 30 seconds, and `omni cron run` runs whatever is due and exits -
 put that in Windows Task Scheduler or crontab to have jobs fire while no session is open. `omni cron list` shows
 the jobs. In a session the model manages jobs with the `cronjob` tool; `/cron` lists them.
@@ -56,6 +66,9 @@ def _field(spec: str, lo: int, hi: int) -> set:
 def parse_schedule(text: str) -> Dict[str, Any]:
     """-> {"kind": "interval", "seconds"} | {"kind": "cron", "fields"} | {"kind": "once", "at"}; raises ValueError."""
     s = (text or "").strip().lower()
+    m = re.match(r"^on\s+([a-z0-9][a-z0-9_.-]{0,63})(\s+repeat)?$", s)
+    if m:
+        return {"kind": "signal", "name": m.group(1), "repeat": bool(m.group(2))}
     m = re.match(r"^(every|in)\s+(\d+)\s*([smhdw])[a-z]*$", s)
     if m:
         seconds = int(m.group(2)) * _UNITS[m.group(3)]
@@ -82,6 +95,8 @@ def next_run(schedule: Dict[str, Any], after: float) -> Optional[float]:
         return after + schedule["seconds"]
     if kind == "once":
         return schedule["at"] if schedule["at"] > after else None
+    if kind == "signal":
+        return None  # runs when the signal arrives, not at a time
     minute, hour, dom, month, dow = (set(f) for f in schedule["fields"])
     t = datetime.fromtimestamp(after).replace(second=0, microsecond=0) + timedelta(minutes=1)
     for _ in range(366 * 24 * 60):
@@ -94,6 +109,49 @@ def next_run(schedule: Dict[str, Any], after: float) -> Optional[float]:
         else:
             t += timedelta(minutes=1)
     return None
+
+
+# ------------------------------------------------------------------------------------------- signals
+HEARTBEAT_OK = "HEARTBEAT_OK"
+
+
+def send_signal(agent_dir: Path, name: str, payload: str = "") -> int:
+    """Queue a signal; jobs waiting `on <name>` run at the next scheduler tick. Returns how many jobs are waiting."""
+    name = name.strip().lower()
+    if not re.match(r"^[a-z0-9][a-z0-9_.-]{0,63}$", name):
+        raise ValueError("signal names use letters, numbers, '.', '_' and '-'")
+    d = cron_dir(agent_dir) / "signals"
+    d.mkdir(parents=True, exist_ok=True)
+    with _file_lock:
+        f = d / f"{name}.json"
+        try:
+            queue = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            queue = []
+        queue.append({"at": time.time(), "payload": str(payload)[:4000]})
+        f.write_text(json.dumps(queue), encoding="utf-8")
+    return sum(1 for j in load_jobs(agent_dir) if j.get("enabled") and _signal_name(j) == name)
+
+
+def _signal_name(job: Dict[str, Any]) -> Optional[str]:
+    try:
+        sched = parse_schedule(job.get("schedule", ""))
+    except ValueError:
+        return None
+    return sched["name"] if sched["kind"] == "signal" else None
+
+
+def _take_signal(agent_dir: Path, name: str) -> Optional[Dict[str, Any]]:
+    f = cron_dir(agent_dir) / "signals" / f"{name}.json"
+    try:
+        queue = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not queue:
+        return None
+    first = queue.pop(0)
+    f.write_text(json.dumps(queue), encoding="utf-8") if queue else f.unlink()
+    return first
 
 
 # ------------------------------------------------------------------------------------------- storage
@@ -118,12 +176,12 @@ def save_jobs(agent_dir: Path, jobs: List[Dict[str, Any]]) -> None:
 
 
 def create_job(agent_dir: Path, name: str, prompt: str, schedule_text: str, cwd: str, profile: str = "",
-               model: str = "", now: Optional[float] = None, deliver: str = "") -> Dict[str, Any]:
+               model: str = "", now: Optional[float] = None, deliver: str = "", heartbeat: bool = False) -> Dict[str, Any]:
     sched = parse_schedule(schedule_text)
     now = time.time() if now is None else now
     job = {"id": uuid.uuid4().hex[:8], "name": name.strip() or prompt.strip()[:40], "prompt": prompt, "schedule": schedule_text.strip(),
            "cwd": cwd, "profile": profile, "model": model, "enabled": True, "created": now,
-           "next_run": next_run(sched, now), "last_run": None, "last_status": None, "runs": 0, "deliver": deliver}
+           "next_run": next_run(sched, now), "last_run": None, "last_status": None, "runs": 0, "deliver": deliver, "heartbeat": bool(heartbeat)}
     with _file_lock:
         jobs = load_jobs(agent_dir)
         jobs.append(job)
@@ -165,7 +223,18 @@ def run_job(agent_dir: Path, job: Dict[str, Any]) -> Tuple[str, str]:
     s = AgentSession(opts, ui=HeadlessUI())
     try:
         s.start()
-        s.prompt(job["prompt"], source="cron")
+        prompt = job["prompt"]
+        if job.get("signal_payload") is not None:
+            prompt += f"\n\nThe event you were waiting for has arrived" + (f": {job['signal_payload']}" if job["signal_payload"] else ".")
+        if job.get("heartbeat"):
+            notes = ""
+            try:
+                notes = (Path(cwd) / "HEARTBEAT.md").read_text(encoding="utf-8")[:6000]
+            except OSError:
+                pass
+            prompt = ("Heartbeat check." + (f"\n\nStanding instructions (HEARTBEAT.md):\n{notes}" if notes.strip() else "") +
+                      f"\n\n{prompt}\n\nIf nothing needs the user's attention right now, reply with exactly {HEARTBEAT_OK} and nothing else.")
+        s.prompt(prompt, source="cron")
         msgs = [e["message"] for e in s.sessions.get_branch() if e.get("type") == "message" and e["message"].get("role") == "assistant"]
         last = msgs[-1] if msgs else None
         if last is None:
@@ -189,6 +258,7 @@ def run_due(agent_dir: Path, now: Optional[float] = None, only: Optional[str] = 
     with _file_lock:
         jobs = load_jobs(agent_dir)
         due = []
+        taken: Dict[str, Any] = {}
         for j in jobs:
             running = j.get("running_since")
             if running and now - running < STALE_RUN_SECONDS:
@@ -196,17 +266,29 @@ def run_due(agent_dir: Path, now: Optional[float] = None, only: Optional[str] = 
             if (only and j["id"] == only) or (not only and j.get("enabled") and j.get("next_run") and j["next_run"] <= now):
                 j["running_since"] = now
                 due.append(dict(j))
+            elif not only and j.get("enabled") and _signal_name(j):
+                name = _signal_name(j)
+                if name not in taken:  # one signal wakes every job waiting for it
+                    taken[name] = _take_signal(agent_dir, name)
+                sig = taken[name]
+                if sig is not None:
+                    j["running_since"] = now
+                    due.append(dict(j, signal_payload=sig.get("payload", "")))
         if due:
             save_jobs(agent_dir, jobs)
     results = []
     for job in due:
         started = time.time()
         status, text = run_job(agent_dir, job)
+        quiet = bool(job.get("heartbeat")) and status == "ok" and HEARTBEAT_OK in text and len(text.strip()) < 200
+        if quiet:
+            status = "idle"  # a heartbeat with nothing to report leaves no file and sends nothing
         out_dir = cron_dir(agent_dir) / "output" / job["id"]
-        out_dir.mkdir(parents=True, exist_ok=True)
         out_file = out_dir / (time.strftime("%Y%m%d-%H%M%S", time.localtime(started)) + ".md")
-        out_file.write_text(f"# {job['name']}\n\n- schedule: {job['schedule']}\n- ran: {_when(started)}\n- status: {status}\n\n{text}\n",
-                            encoding="utf-8")
+        if not quiet:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_file.write_text(f"# {job['name']}\n\n- schedule: {job['schedule']}\n- ran: {_when(started)}\n- status: {status}\n\n{text}\n",
+                                encoding="utf-8")
         with _file_lock:
             jobs = load_jobs(agent_dir)
             for j in jobs:
@@ -218,14 +300,15 @@ def run_due(agent_dir: Path, now: Optional[float] = None, only: Optional[str] = 
                     j["next_run"] = next_run(parse_schedule(j["schedule"]), max(now, started)) if not only or j.get("enabled") else j.get("next_run")
                 except ValueError:
                     j["next_run"] = None
-                if parse_schedule(j["schedule"])["kind"] == "once":
+                kind = parse_schedule(j["schedule"])
+                if kind["kind"] == "once" or (kind["kind"] == "signal" and not kind.get("repeat") and "signal_payload" in job):
                     j["enabled"], j["next_run"] = False, None
             save_jobs(agent_dir, jobs)
         undelivered = None
-        if job.get("deliver"):  # send the result to the chat the job belongs to (gateway channels)
+        if job.get("deliver") and not quiet:  # send the result to the chat the job belongs to (gateway channels)
             from ..gateway import deliver as send_to_chat
             undelivered = send_to_chat(agent_dir, job["deliver"], f"⏰ {job['name']} ({status})\n\n{text[:3500]}")
-        results.append({"id": job["id"], "name": job["name"], "status": status, "text": text, "file": str(out_file),
+        results.append({"id": job["id"], "name": job["name"], "status": status, "text": text, "file": "" if quiet else str(out_file),
                         "delivered": bool(job.get("deliver")) and undelivered is None, "delivery_error": undelivered})
     return results
 
@@ -252,11 +335,18 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
             try:
                 job = create_job(agent, str(p.get("name") or ""), prompt, schedule, session.cwd,
                                  str(session.base_profile.get("name") or ""), model_key(session.model) if session.model else "",
-                                 deliver=str(p.get("deliver") or getattr(session, "gateway_target", "") or ""))
+                                 deliver=str(p.get("deliver") or getattr(session, "gateway_target", "") or ""),
+                                 heartbeat=bool(p.get("heartbeat")))
             except ValueError as e:
                 raise ToolError(str(e)) from None
             return text_result(f"Scheduled job {job['id']} \"{job['name']}\" ({job['schedule']}); next run {_when(job['next_run'])}.",
                                {"id": job["id"], "next_run": job["next_run"]})
+        if action == "signal":
+            try:
+                waiting = send_signal(agent, str(p.get("name") or p.get("id") or ""), str(p.get("payload") or ""))
+            except ValueError as e:
+                raise ToolError(str(e)) from None
+            return text_result(f"Signal sent; {waiting} job(s) are waiting for it.", {"waiting": waiting})
         job = find(str(p.get("id") or p.get("name") or ""))
         if action == "run":
             r = run_due(agent, only=job["id"])
@@ -284,12 +374,15 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
         name="cronjob", label="Schedule",
         description="Schedule a prompt to run later or repeatedly in a fresh unattended session. Actions: create "
                     "(prompt, schedule, name?), list, run (id), pause (id), resume (id), remove (id). Schedules: "
-                    "`every 30m`, `every 1d`, cron `0 9 * * 1-5`, `in 20m`, or an ISO time. The prompt must be "
+                    "`every 30m`, `every 1d`, cron `0 9 * * 1-5`, `in 20m`, an ISO time, or `on <signal>` to wait for an "
+                    "event (send it with action=signal, name, payload). The prompt must be "
                     "self-contained: the scheduled run does not see this conversation.",
         parameters={"type": "object", "properties": {
-            "action": {"type": "string", "enum": ["create", "list", "run", "pause", "resume", "remove"]},
+            "action": {"type": "string", "enum": ["create", "list", "run", "pause", "resume", "remove", "signal"]},
             "prompt": {"type": "string"}, "schedule": {"type": "string"}, "name": {"type": "string"}, "id": {"type": "string"},
-            "deliver": {"type": "string", "description": "send results to a chat, e.g. telegram:123456 (optional)"}},
+            "deliver": {"type": "string", "description": "send results to a chat, e.g. telegram:123456 (optional)"},
+            "heartbeat": {"type": "boolean", "description": "a recurring check that reports only when something needs attention"},
+            "payload": {"type": "string", "description": "text for action=signal"}},
             "required": ["action"]},
         execute=execute, prompt_snippet="Schedule prompts to run later or repeatedly")}
 
@@ -339,6 +432,14 @@ def cli(argv: List[str], agent_dir: Path) -> int:
         if not results:
             print("Nothing is due.")
         return 0 if all(r["status"] == "ok" for r in results) else 1
+    if sub == "signal" and len(argv) > 1:
+        try:
+            n = send_signal(agent_dir, argv[1], " ".join(argv[2:]))
+        except ValueError as e:
+            print(e)
+            return 2
+        print(f"Signal '{argv[1]}' sent; {n} job(s) are waiting for it." + ("" if n else " (none yet: it stays queued)"))
+        return 0
     if sub == "remove" and len(argv) > 1:
         with _file_lock:
             jobs = load_jobs(agent_dir)

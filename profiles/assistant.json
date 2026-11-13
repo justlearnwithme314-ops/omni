@@ -22,7 +22,8 @@
     "memory-reflect",
     "diagnostics",
     "approvals",
-    "code-exec"
+    "code-exec",
+    "self-evolve"
   ],
   "skills_budget_chars": 8000
 }
