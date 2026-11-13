@@ -240,7 +240,15 @@ def _commands(session: Any) -> Dict[str, Any]:
         if tr is None or tr.score(value, comment.strip()) is None:
             return "No run to rate yet."
         return f"Rated the last run {value:g}" + (f" ({comment.strip()})" if comment.strip() else "") + "."
-    return {"trace": ("Show where the last run's time, tokens and cost went", run),
+    def usage(args: str) -> str:
+        from .. import usage as u
+        try:
+            days = float(args.strip()) if args.strip() else 7.0
+        except ValueError:
+            return "Usage: /usage [days]"
+        return u.format_text(u.summarize(Path(session.agent_dir), days))
+    return {"usage": ("Runs, tokens, cost and slow tools over the last days", usage),
+            "trace": ("Show where the last run's time, tokens and cost went", run),
             "rate": ("Rate the last run (up / down / a number), with an optional comment", rate)}
 
 

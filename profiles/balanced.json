@@ -11,7 +11,8 @@
     "hermes-plugins",
     "diagnostics",
     "approvals",
-    "code-exec"
+    "code-exec",
+    "code-nav"
   ],
   "omni_registry": {
     "enabled": true,

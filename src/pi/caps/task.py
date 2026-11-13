@@ -86,6 +86,18 @@ def resolve_model_choice(session: Any, choice: str) -> Optional[Dict[str, Any]]:
     return m if m and session.auth.has_auth(m["provider"]) else None
 
 
+def shared_memory(parent: Any) -> str:
+    """The parent's core memory blocks, for the subagent to read (it cannot edit them)."""
+    if not parent.caps.is_enabled("memory"):
+        return ""
+    try:
+        from . import memory as mem
+        text = mem._prompt(parent)
+    except Exception:
+        return ""
+    return ("\n\nShared memory (read-only; what the main agent knows about the user and the project):\n" + text[:4000]) if text else ""
+
+
 def run_subagent(parent: Any, prompt: str, read_only: bool, signal: Any = None, on_update: Any = None,
                  agent: Optional[Dict[str, Any]] = None, model_choice: str = "") -> Dict[str, Any]:
     from ..agent import AgentSession, SessionOptions
@@ -114,7 +126,7 @@ def run_subagent(parent: Any, prompt: str, read_only: bool, signal: Any = None, 
         cwd=parent.cwd, model=model, thinking=parent.thinking_level, mode="print",
         tools=",".join(tools), no_session=True, no_extensions=True, no_mcp=True,
         no_prompt_templates=True, approve=parent.trusted, agent_dir=str(parent.agent_dir), profile="core",
-        capabilities=[], append_system_prompt=system)
+        capabilities=[], append_system_prompt=system + shared_memory(parent))
     child = AgentSession(opts, ui=HeadlessUI())
     child.start()
     child.gate = parent.gate  # the parent's permission gate also guards the subagent

@@ -225,6 +225,17 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
                     pass
             return {"content": [{"type": "text", "text": "Screenshot of the current page."},
                                 {"type": "image", "data": data, "mimeType": "image/png"}], "details": {"action": action}}
+        if action == "wait":
+            want, limit = str(p.get("text") or ""), max(0.2, min(float(p.get("seconds") or (10 if p.get("text") else 2)), 60))
+            if not want:
+                time.sleep(limit)
+                return text_result(b.state(), {"action": action, "waited": limit})
+            deadline = time.time() + limit
+            while time.time() < deadline:
+                if want.lower() in str(b.js(TEXT_JS) or "").lower():
+                    return text_result(b.state(), {"action": action, "found": True})
+                time.sleep(0.4)
+            raise ToolError(f"'{want}' did not appear within {limit:g} seconds")
         if action == "tabs":
             tabs = b.connect().list_tabs()
             return text_result("\n".join(f"{t.id[:8]}  {t.title[:60]}  {t.url[:100]}" for t in tabs) or "(no tabs)", {"action": action})
@@ -232,19 +243,20 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
             _unload(session)
             session._browser = Browser(session)
             return text_result("Browser connection closed.", {"action": action})
-        raise ToolError("action must be one of: open, state, click, type, select, scroll, back, text, screenshot, tabs, close")
+        raise ToolError("action must be one of: open, state, click, type, select, scroll, back, text, wait, screenshot, tabs, close")
 
     return {"browser": ToolDef(
         name="browser", label="Browser",
         description="Control a real web browser. Pages are shown as numbered interactive elements, e.g. "
                     "`[3]<button type=submit>Sign in</button>`; act on the number. Actions: open(url), state, "
                     "click(index), type(index, text, submit?), select(index, text), scroll(direction up|down), back, "
-                    "text(offset?) to read the page content, screenshot (an image, for visual checks), tabs, close. Every action returns the page's new state; "
+                    "text(offset?) to read the page content, wait(text?, seconds?) until text appears, screenshot (an image, for visual checks), tabs, close. Every action returns the page's new state; "
                     "indexes are valid only for the latest state.",
         parameters={"type": "object", "properties": {
-            "action": {"type": "string", "enum": ["open", "state", "click", "type", "select", "scroll", "back", "text", "screenshot", "tabs", "close"]},
+            "action": {"type": "string", "enum": ["open", "state", "click", "type", "select", "scroll", "back", "text", "wait", "screenshot", "tabs", "close"]},
             "url": {"type": "string"}, "index": {"type": "integer"}, "text": {"type": "string"},
-            "submit": {"type": "boolean"}, "direction": {"type": "string"}, "offset": {"type": "integer"}},
+            "submit": {"type": "boolean"}, "direction": {"type": "string"}, "offset": {"type": "integer"},
+            "seconds": {"type": "number"}},
             "required": ["action"]},
         execute=execute, prompt_snippet="Browse and operate web pages")}
 

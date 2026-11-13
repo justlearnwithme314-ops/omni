@@ -177,6 +177,10 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
         from . import resources as res
         from .caps.scheduler import cli as cron_cli
         hard_exit(cron_cli(raw[1:] if raw[0] == "cron" else ["signal"] + raw[1:], res.agent_dir()))
+    if raw[:1] == ["usage"]:
+        from . import resources as res
+        from .usage import cli as usage_cli
+        hard_exit(usage_cli(raw[1:], res.agent_dir()))
     if raw[:1] in (["eval"], ["evolve"]) and len(raw) > 1:
         from . import resources as res
         if raw[0] == "eval":
