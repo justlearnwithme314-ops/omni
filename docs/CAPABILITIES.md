@@ -56,7 +56,14 @@ Hosts for other people's code (also capabilities):
 | `hermes-plugins` | Hermes plugins (`plugin.yaml` + `register(ctx)`) from `~/.hermes/plugins`, the project's `.hermes/plugins` and Omni's `plugins/hermes`, in-process, with their tools, commands, prompt sections and hooks: `pre_tool_call` (veto), `post_tool_call`, `transform_tool_result`, `transform_terminal_output`, `pre_llm_call` (adds context), `post_llm_call`, `on_session_start` / `on_session_end`. Other registrations are accepted and listed by `/doctor` as not supported yet |
 | `hooks` | Shell-command hooks in Claude Code's format (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `SessionStart`, `Stop`) from `<agent-dir>/hooks.json` and the project's `.omni/hooks.json`. Exit code 2 blocks. Claude Code's own settings files are read only when the profile sets `"hooks": {"claude": true}` |
 
+`memory` takes extra labeled blocks (Letta's core-memory blocks) per profile: `"memory": {"blocks": {"persona": 800, "project": {"limit": 1500, "description": "..."}}}`.
+
+`task` accepts a `model`: a role from `modelRoles` in settings.json or `model_roles` in the profile (Oh My Pi's smol / slow / plan), or any model id.
+
 `task` also runs **named agents**: markdown files with `name` / `description` / `tools` / `model` frontmatter in `<agent-dir>/agents`, the project's `.omni/agents` or `.pi/agents`, and (with `skills-universal`) `.claude/agents`.
+
+| `claude-compat` | Claude Code's slash commands (`~/.claude/commands`, the project's `.claude/commands`), the project's `.mcp.json`, and Claude Code plugins (a folder with `.claude-plugin/plugin.json`: its `commands/`, `agents/`, `skills/`, `hooks/hooks.json`, `.mcp.json`). `/plugins` lists them. Your own prompts, skills and `mcp.json` win on a name clash |
+| `scheduler` | `cronjob` tool, `/cron`, `omni cron list / run / remove`. Jobs (`every 2h`, cron expressions, `in 20m`, ISO times) run a prompt in a fresh unattended session and save the answer under `<agent-dir>/cron/output`. An open session checks every 30 s; `omni cron run` is for Task Scheduler / crontab |
 
 Host switches (same commands, they flip profile keys):
 
@@ -82,6 +89,15 @@ A toggle is saved to `<agent-dir>/omni-capabilities.json` and applies on top of 
 capability back to what the profile already says removes the override.
 
 ## Custom profiles
+
+```
+/profile new                  wizard: pick a base profile, tick modules and hosts, name it
+/profile edit my-setup        same picker on an existing custom profile
+/profile show my-setup        what a profile is made of
+/profile delete my-setup      custom profiles only
+```
+
+The wizard writes a JSON file to `~/.omni/profiles/`; nothing changes until the last step.
 
 ```
 /profile save my-setup        writes ~/.omni/profiles/my-setup.json from the current state
@@ -169,7 +185,7 @@ Done means covered by an offline test in `tests/`.
 |---|---|---|
 | **Pi** | core loop, 7 tools, sessions, TUI, extensions host, MCP, packages, codemode, OAuth sign-ins (see `PI_PROFILE.md`) | keybindings.json, sixel images |
 | **Oh My Pi** | extensions load through the same host; `todo`, `task`, `ask`, `fetch`, `checkpoint` / `rewind`, plan mode, `ast_grep` / `ast_edit` (via the CLI), hashline edits (ranges, inserts, cut/paste registers, create / delete / move), `web_search`, named agents for `task`; OAuth flows ported | hashline syntax-block ops (`N*`), `lsp`, `github`, `eval`, model roles, TTSR, snapcompact, the remaining slash commands, its extra extension API |
-| **Hermes** | `memory` (file-compatible), `todo`, `delegate_task` equivalent, `skill_manage`, `session_search`, `web_search`, skill gating by `platforms`; plugin host with tools, commands, prompt sections and the eight core hooks | the other plugin kinds (memory providers, context engines, platforms, image / video generation), streaming and API-request hooks, cron, messaging platforms, self-evolution job |
+| **Hermes** | `memory` (file-compatible), `todo`, `delegate_task` equivalent, `skill_manage`, `session_search`, `web_search`, skill gating by `platforms`; plugin host with tools, commands, prompt sections and the eight core hooks | the other plugin kinds (memory providers, context engines, platforms, image / video generation), streaming and API-request hooks, messaging platforms, cron delivery to chat channels, self-evolution job |
 | **OpenClaw** | skills with `metadata.openclaw` gating; plugins through the legacy adapter | `openclaw.plugin.json` + plugin SDK host, gateway daemon, channels, exec approvals, nodes, ACP |
 
 The order for the remaining work is in `INTEGRATION_PLAN.md` (phases 3-5).

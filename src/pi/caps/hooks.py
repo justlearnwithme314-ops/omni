@@ -55,6 +55,13 @@ def load_config(session: Any) -> Dict[str, List[Dict[str, Any]]]:
     for f in files:
         for event, groups in _read(f).items():
             merged.setdefault(event, []).extend(g for g in groups if isinstance(g, dict))
+    for f, plugin_root in session.caps.collect("hook_files"):  # hooks shipped inside plugins
+        for event, groups in _read(Path(f)).items():
+            for g in groups:
+                if isinstance(g, dict):
+                    g = dict(g, hooks=[dict(h, command=str(h.get("command", "")).replace("${CLAUDE_PLUGIN_ROOT}", str(plugin_root or "")))
+                                       for h in g.get("hooks") or [] if isinstance(h, dict)])
+                    merged.setdefault(event, []).append(g)
     return merged
 
 

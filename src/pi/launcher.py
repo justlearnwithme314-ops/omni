@@ -128,6 +128,10 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
     raw = sys.argv[1:] if argv is None else argv
     if profile_command(raw) or capability_command(raw):
         sys.exit(0)
+    if raw[:1] == ["cron"]:
+        from . import resources as res
+        from .caps.scheduler import cli as cron_cli
+        hard_exit(cron_cli(raw[1:], res.agent_dir()))
     from .subcommands import run as run_sub
     sub = raw[1:] if raw[:1] == ["pi"] else raw
     rc = run_sub(sub)

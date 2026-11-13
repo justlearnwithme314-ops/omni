@@ -44,6 +44,7 @@ def discover_agents(session: Any) -> Dict[str, Dict[str, Any]]:
         roots.append(Path.home() / ".claude" / "agents")
         if session.trusted:
             roots.append(Path(session.cwd) / ".claude" / "agents")
+    roots += [Path(p) for p in session.caps.collect("agent_roots")]
     out: Dict[str, Dict[str, Any]] = {}
     for r in roots:
         if not r.is_dir():
@@ -70,8 +71,23 @@ def discover_agents(session: Any) -> Dict[str, Dict[str, Any]]:
     return out
 
 
+def model_roles(session: Any) -> Dict[str, str]:
+    """Named model roles (Oh My Pi's smol / slow / plan): settings.json `modelRoles`, overridden by the profile's."""
+    roles: Dict[str, str] = {}
+    for src in (session.settings.get("modelRoles"), session.profile.get("model_roles")):
+        if isinstance(src, dict):
+            roles.update({str(k).lower(): str(v) for k, v in src.items() if v})
+    return roles
+
+
+def resolve_model_choice(session: Any, choice: str) -> Optional[Dict[str, Any]]:
+    pattern = model_roles(session).get(choice.strip().lower(), choice.strip())
+    m = session.registry.resolve(pattern)
+    return m if m and session.auth.has_auth(m["provider"]) else None
+
+
 def run_subagent(parent: Any, prompt: str, read_only: bool, signal: Any = None, on_update: Any = None,
-                 agent: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 agent: Optional[Dict[str, Any]] = None, model_choice: str = "") -> Dict[str, Any]:
     from ..agent import AgentSession, SessionOptions
     from ..ai.models import model_key
     from ..modes import HeadlessUI
@@ -88,6 +104,12 @@ def run_subagent(parent: Any, prompt: str, read_only: bool, signal: Any = None, 
             if m and parent.auth.has_auth(m["provider"]):
                 model = model_key(m)
         system = SUBAGENT_PROMPT + "\n\n" + agent["prompt"]
+    if model_choice:  # an explicit choice for this call beats the agent file
+        picked = resolve_model_choice(parent, model_choice)
+        if picked is None:
+            raise ToolError(f"model '{model_choice}' is not a configured role or an available model. Roles: "
+                            f"{', '.join(sorted(model_roles(parent))) or '(none configured)'}")
+        model = model_key(picked)
     opts = SessionOptions(
         cwd=parent.cwd, model=model, thinking=parent.thinking_level, mode="print",
         tools=",".join(tools), no_session=True, no_extensions=True, no_mcp=True,
@@ -137,7 +159,7 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
             agent = agents.get(str(p["agent"]).strip().lower())
             if agent is None:
                 raise ToolError(f"unknown agent '{p['agent']}'. Available: {', '.join(sorted(agents)) or '(none defined)'}")
-        r = run_subagent(session, prompt, bool(p.get("read_only")), signal, on_update, agent)
+        r = run_subagent(session, prompt, bool(p.get("read_only")), signal, on_update, agent, str(p.get("model") or ""))
         text = r["text"] or "(the subagent finished without a written report)"
         if len(text) > MAX_REPORT_CHARS:
             text = text[:MAX_REPORT_CHARS] + f"\n\n[report truncated: {len(r['text']) - MAX_REPORT_CHARS} more characters]"
@@ -149,16 +171,19 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
     if agents:
         rows = [f"{n}: {a['description'][:90]}" if a["description"] else n for n, a in sorted(agents.items())]
         listing = " Named agents (pass as `agent`): " + "; ".join(rows)[:700] + "."
+    configured = model_roles(session)
+    roles = f" Model roles (pass as `model`): {', '.join(sorted(configured))}." if configured else ""
     return {"task": ToolDef(
         name="task", label="Task",
         description="Delegate a self-contained task to a subagent with a fresh context and get back only its final "
                     "report. Use it for wide searches, investigations and independent subtasks whose intermediate "
                     "output you do not need. The subagent knows nothing about this conversation: put all context, "
-                    "paths and the expected output in `prompt`. Set read_only=true for pure research." + listing,
+                    "paths and the expected output in `prompt`. Set read_only=true for pure research." + listing + roles,
         parameters={"type": "object", "properties": {
             "description": {"type": "string", "description": "3-6 word label"},
             "prompt": {"type": "string"}, "read_only": {"type": "boolean"},
-            "agent": {"type": "string", "description": "name of a defined agent (optional)"}}, "required": ["prompt"]},
+            "agent": {"type": "string", "description": "name of a defined agent (optional)"},
+            "model": {"type": "string", "description": "model role or id for this subagent (optional)"}}, "required": ["prompt"]},
         execute=execute, prompt_snippet="Delegate a self-contained task to a subagent")}
 
 
