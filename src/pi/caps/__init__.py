@@ -63,7 +63,7 @@ class Capability:
 
 CAPABILITIES: Dict[str, Capability] = {}
 _BUILTIN_MODULES = ["todo", "ask", "fetch", "memory", "task", "skills", "checkpoint", "hashline", "ast", "plan", "search",
-                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "openclaw_plugins", "diagnostics", "reflect", "approvals", "code_exec", "evolution", "hosts"]
+                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "openclaw_plugins", "diagnostics", "reflect", "approvals", "code_exec", "evolution", "code_nav", "hosts"]
 _loaded = False
 
 

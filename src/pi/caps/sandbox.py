@@ -16,6 +16,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from typing import Any, Dict, List, Optional
 
 from ..tools.base import ToolDef, ToolError, check_abort, text_result
@@ -143,8 +144,21 @@ def _commands(session: Any) -> Dict[str, Any]:
         if args.strip() == "reset":
             box.destroy()
             return "Sandbox removed; a fresh one starts with the next command."
-        return box.describe()
-    return {"sandbox": ("Show the sandbox container, or `reset` it", run)}
+        word, _, name = args.strip().partition(" ")
+        if word == "snapshot":  # Daytona snapshots: keep the container's installed state as an image
+            name = name.strip() or f"omni-snapshot-{int(time.time())}"
+            if not box.started:
+                return "Nothing to snapshot yet: the sandbox starts with the first command."
+            try:
+                p = box._run(["commit", box.name, name], timeout=300)
+            except Exception as e:
+                return f"Snapshot failed: {type(e).__name__}: {e}"
+            if p.returncode != 0:
+                return f"Snapshot failed: {(p.stderr or p.stdout).strip()[:300]}"
+            return (f"Saved the sandbox as image `{name}`. To start from it, set \"sandbox\": {{\"image\": \"{name}\"}} "
+                    "in a profile.")
+        return box.describe() + "\n/sandbox snapshot [name] saves its state as an image · /sandbox reset discards it"
+    return {"sandbox": ("Show the sandbox container, `snapshot [name]` it, or `reset` it", run)}
 
 
 CAPABILITIES = [Capability("sandbox", "Sandboxed shell", "bash runs in a per-session container with the project mounted "

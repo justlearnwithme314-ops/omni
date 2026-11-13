@@ -23,7 +23,8 @@
     "diagnostics",
     "approvals",
     "code-exec",
-    "self-evolve"
+    "self-evolve",
+    "code-nav"
   ],
   "skills_budget_chars": 8000
 }

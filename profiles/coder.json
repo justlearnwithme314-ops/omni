@@ -15,6 +15,7 @@
     "claude-compat",
     "diagnostics",
     "approvals",
-    "code-exec"
+    "code-exec",
+    "code-nav"
   ]
 }

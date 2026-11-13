@@ -191,6 +191,13 @@ with `gateway.register_channel(name, factory)`. `omni gateway status` shows the 
 - **Self-evolution** (Hermes, `self-evolve`): `/evolve run` or `omni evolve run` studies recent sessions and proposes new skills, skill corrections and memory entries. Nothing is applied until `/evolve apply <id>`; a corrected skill keeps its previous text as `SKILL.md.bak`.
 - **Evaluations** (Langfuse): `omni eval cases.jsonl --profiles core,coder --models a,b` runs the same prompts under each variant and reports pass rate, tokens, cost and time. Cases are JSONL with `prompt` and an optional `expect` (text, `contains`, `not_contains`, `regex`, `tools`).
 
+## Navigation, usage and small extras
+
+- **`code-nav`** (Oh My Pi `lsp`, navigation part): `code_nav` with `outline(path)`, `definition(name)` and `references(name)`. Exact for Python (parsed with `ast`); pattern-based for other languages. Not a language server: no types, no rename.
+- **Usage report** (Langfuse dashboards): `omni usage [--days N] [--html report.html]` and `/usage` add up the local traces: runs, tokens and cost per day, by model, slowest tools, your ratings.
+- **Shared memory for subagents** (Letta shared blocks): with `memory` on, a `task` subagent reads the parent's core memory; it cannot change it.
+- **Browser**: `wait(text?, seconds?)` until text appears. **Sandbox**: `/sandbox snapshot [name]` saves the container as an image you can start from.
+
 ## Startup time and health
 
 - The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.
