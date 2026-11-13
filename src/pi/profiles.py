@@ -109,8 +109,32 @@ def list_profiles() -> List[Dict[str, Any]]:
     return [load_profile(n) for n in sorted(names, key=lambda n: (ORDER.index(n) if n in ORDER else 99, n))]
 
 
+def delete_profile(name: str) -> None:
+    name = (name or "").strip().lower()
+    f = user_profiles_dir() / f"{name}.json"
+    if not name or not f.is_file():
+        raise ValueError(f"'{name}' is not a custom profile (built-in profiles cannot be deleted)")
+    f.unlink()
+
+
+def describe_profile(name: Optional[str]) -> List[str]:
+    """What a profile is made of, for `/profile show`."""
+    from .caps import load_builtin
+    prof = load_profile(name)
+    caps = load_builtin()
+    custom = (user_profiles_dir() / f"{prof['name']}.json").is_file()
+    lines = [f"{prof['name']}{' (custom)' if custom else ''} — {prof.get('description', '')}", f"  tools: {prof.get('tools', '')}", "  modules:"]
+    lines += [f"    {c:<19} {caps[c].description if c in caps else '(unknown)'}" for c in prof.get("capabilities") or []] or ["    (none)"]
+    on = [c.id for c in caps.values() if c.is_on is not None and c.is_on(prof)]
+    lines.append(f"  hosts on: {', '.join(sorted(on)) or '(none)'}")
+    for k in ("skills_budget_chars", "memory", "tracing", "sandbox", "browser", "hooks", "model_roles"):
+        if prof.get(k):
+            lines.append(f"  {k}: {json.dumps(prof[k])}")
+    return lines
+
+
 def save_profile(name: str, extends: str, capabilities: List[str], description: str = "",
-                 extra: Optional[Dict[str, Any]] = None) -> Path:
+                 extra: Optional[Dict[str, Any]] = None, overwrite: bool = False) -> Path:
     """Write a custom profile (`/profile save <name>`): the parent profile plus an exact capability list."""
     import re
     name = name.strip().lower()
@@ -123,6 +147,8 @@ def save_profile(name: str, extends: str, capabilities: List[str], description: 
     data = {"name": name, "extends": extends, "description": description or f"Custom profile based on {extends}.",
             "capabilities": list(capabilities), **(extra or {})}
     path = d / f"{name}.json"
+    if path.exists() and not overwrite:
+        raise ValueError(f"a custom profile '{name}' already exists; use /profile edit {name} or pick another name")
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     return path
 

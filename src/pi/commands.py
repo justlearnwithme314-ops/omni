@@ -53,7 +53,8 @@ OMNI_EXTRAS: List[Tuple[str, str, Optional[str]]] = [
     ("extensions", "Show loaded extensions, their tools/commands and compatibility gaps; `slow` ranks them by time", "[slow]"),
     ("debug", "Write session messages and rendered screen to omni-pi-debug.log", None),
     ("theme", "Switch colour theme", "<name>"),
-    ("profile", "Switch profile: core (barebones) … full (everything); `save <name>` keeps the current setup", "<name>"),
+    ("profile", "Switch profile (core … full), or `new` / `edit <name>` / `show <name>` / `delete <name>` / `save <name>` for your own",
+     "<name> | new | edit | show | delete | save"),
     ("doctor", "Health check: sign-ins, modules, extensions, plugins, hooks, MCP, and what is slow", None),
     ("plan", "Plan mode: read-only until you approve the model's plan (needs the `plan` capability)", "[on|off]"),
     ("capabilities", "Turn modules on/off (todo, memory, subagents, hosts…) and see what each costs in context",
@@ -755,6 +756,24 @@ class Commands:
                 return
             self.port.notify(f"Saved profile '{new.lower()}' to {path}. Switch with /profile {new.lower()}.", "success")
             return
+        word = args.strip().split(" ", 1)[0].lower()
+        rest = args.strip().split(" ", 1)[1].strip() if " " in args.strip() else ""
+        if word in ("new", "create", "edit"):
+            self._profile_wizard(rest, edit=word == "edit")
+            return
+        if word in ("delete", "remove"):
+            from .profiles import delete_profile
+            try:
+                delete_profile(rest)
+            except ValueError as e:
+                self.port.notify(str(e), "error")
+                return
+            self.port.notify(f"Deleted custom profile '{rest.lower()}'.", "success")
+            return
+        if word == "show":
+            from .profiles import describe_profile
+            self.port.show("profile", describe_profile(rest or self.s.profile.get("name")))
+            return
         name = canonical(args.strip()) if args.strip() else ""
         if not name:
             cur = self.s.profile.get("name")
@@ -773,6 +792,83 @@ class Commands:
         self.port.reset_transcript()
         self.port.notify(f"Profile: {name} · {len(self.s.active_tool_names)} tools · "
                          f"{len(self.s.caps.enabled)} module(s): {', '.join(self.s.caps.enabled) or 'none'}", "success")
+
+    def _profile_wizard(self, name: str, edit: bool = False) -> None:
+        """Build a custom profile step by step: base, modules (with what each adds), name. Nothing changes until saved."""
+        from .caps import load_builtin
+        from .profiles import BUILTIN, PROJECT_ROOT, canonical, list_profiles, load_profile, save_profile, user_profiles_dir
+        profiles = list_profiles()
+        caps = load_builtin()
+        existing = None
+        if edit:
+            name = canonical(name) if name else str(self.s.base_profile.get("name"))
+            f = user_profiles_dir() / f"{name}.json"
+            if not f.is_file():
+                self.port.notify(f"'{name}' is not a custom profile (built-in profiles cannot be edited; use /profile new).", "error")
+                return
+            existing = load_profile(name)
+            try:
+                base = json.loads(f.read_text(encoding="utf-8")).get("extends") or "core"
+            except (OSError, ValueError):
+                base = "core"
+        else:
+            choices = [p for p in profiles if p["name"] in BUILTIN or (PROJECT_ROOT / "profiles" / f"{p['name']}.json").is_file()]
+            labels = [f"{p['name']:<11} {len(p.get('capabilities') or [])} module(s) — {p.get('description', '')}" for p in choices]
+            idx = self.port.select("New profile — 1/3: start from which profile?", labels)
+            if idx is None:
+                return
+            base = choices[idx]["name"]
+        base_prof = load_profile(base)
+        chosen = list((existing or base_prof).get("capabilities") or [])
+        switches = {c.id: c.is_on(existing or base_prof) for c in caps.values() if c.is_on is not None}
+        base_switch = {c.id: c.is_on(base_prof) for c in caps.values() if c.is_on is not None}
+        order = sorted(caps.values(), key=lambda c: (c.is_on is not None, c.group != "feature", c.id))
+        while True:
+            labels = []
+            for c in order:
+                on = switches[c.id] if c.is_on is not None else c.id in chosen
+                labels.append(f"{'[x]' if on else '[ ]'} {c.id:<19} {c.description}" + (f"  ({c.inspired_by})" if c.inspired_by else ""))
+            labels.append(f"✓ continue with {len(chosen)} module(s)")
+            idx = self.port.select(f"{'Edit' if edit else 'New'} profile — 2/3: modules on top of {base} (enter toggles)", labels)
+            if idx is None:
+                return
+            if idx >= len(order):
+                break
+            c = order[idx]
+            if c.is_on is not None:
+                switches[c.id] = not switches[c.id]
+            elif c.id in chosen:
+                chosen.remove(c.id)
+            else:
+                chosen.append(c.id)
+        if not edit:
+            name = (name or self.port.input("New profile — 3/3: name", placeholder="my-setup") or "").strip()
+            if not name:
+                return
+        extra: Dict[str, Any] = {}
+        scratch = json.loads(json.dumps(base_prof))
+        for c in caps.values():
+            if c.is_on is not None and switches[c.id] != base_switch[c.id]:
+                before = json.dumps(scratch, sort_keys=True)
+                c.apply(scratch, switches[c.id])
+                extra.update({k: v for k, v in scratch.items() if k not in ("capabilities", "name")
+                              and json.dumps(v, sort_keys=True) != json.dumps(base_prof.get(k), sort_keys=True)})
+                del before
+        if existing:
+            for k in ("description", "skills_budget_chars", "memory", "tracing", "sandbox", "browser", "hooks", "model_roles",
+                      "prompt_append", "tools", "accent"):
+                if k in existing and existing.get(k) != base_prof.get(k):
+                    extra.setdefault(k, existing[k])
+        desc = extra.pop("description", "") or f"Custom: {base} with {len(chosen)} module(s)."
+        try:
+            path = save_profile(name, base, chosen, desc, extra, overwrite=edit)
+        except ValueError as e:
+            self.port.notify(str(e), "error")
+            return
+        self.port.notify(f"Saved profile '{name.lower()}' ({len(chosen)} modules, based on {base}) to {path}. "
+                         f"Switch with /profile {name.lower()}.", "success")
+        if edit and self.s.base_profile.get("name") == name.lower():
+            self.s.switch_profile(name.lower())
 
     def cmd_capabilities(self, args: str) -> None:
         """List / toggle capabilities. Toggles are saved as the user's overlay and apply to every profile."""

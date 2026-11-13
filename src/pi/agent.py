@@ -378,6 +378,12 @@ class AgentSession:
         self.templates = [] if self.opts.no_prompt_templates else res.discover_templates(
             self.cwd, self.agent_dir, self.trusted, list(self.settings.get("prompts") or []) + pkg_prompts + self.opts.prompt_templates,
             self.shadowed_templates)
+        if not self.opts.no_prompt_templates:  # slash commands from capabilities never override the user's own
+            own = {t.name for t in self.templates}
+            roots = [str(p) for p in self.caps.collect("template_roots")]
+            if roots:
+                self.templates += [t for t in res.discover_templates(self.cwd, Path("/nonexistent"), False, roots)
+                                   if t.name not in own]
         self.context_files = [] if self.opts.no_context_files else res.load_context_files(self.cwd, self.agent_dir)
         self.diagnostics.extend(diag)
 
@@ -459,7 +465,8 @@ class AgentSession:
         if self.opts.no_mcp or self.opts.no_tools or self.profile.get("mcp") is False:
             return
         from .mcp import McpManager
-        self.mcp = McpManager(self.agent_dir, self.cwd, self.trusted, on_change=self._on_mcp_change)
+        self.mcp = McpManager(self.agent_dir, self.cwd, self.trusted, on_change=self._on_mcp_change,
+                              extra_files=self.caps.collect("mcp_files"))
         for name, cfg in getattr(self.ext, "mcp_servers", {}).items():
             self.mcp.registered[name] = {**cfg, "_source": "extension", "_scope": "extension"}
         self.mcp.load()

@@ -16,7 +16,9 @@
     "hermes-plugins",
     "memory-archive",
     "tracing",
-    "durable"
+    "durable",
+    "scheduler",
+    "claude-compat"
   ],
   "skills_budget_chars": 8000
 }

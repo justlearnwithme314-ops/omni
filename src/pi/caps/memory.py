@@ -6,6 +6,11 @@ the files can be copied to or from `~/.hermes/memories`:
     MEMORY.md   the agent's notes: environment facts, conventions, lessons learned      (2200 characters)
     USER.md     what it knows about the user: preferences, role, communication style      (1375 characters)
 
+More blocks (Letta's labeled core-memory blocks: `persona`, `project`, anything you name) can be added per profile,
+each with its own limit and its own `<LABEL>.md` file:
+
+    "memory": {"blocks": {"persona": 800, "project": {"limit": 1500, "description": "facts about this codebase"}}}
+
 The limits are the point: the whole store is injected into the system prompt, so it has a fixed, small context
 cost. The prompt copy is a snapshot taken when the session starts (edits show up next session), which keeps the
 provider's prompt cache valid for the whole conversation.
@@ -25,22 +30,45 @@ FILES = {"memory": "MEMORY.md", "user": "USER.md"}
 TITLES = {"memory": "MEMORY (your personal notes)", "user": "USER PROFILE (who the user is)"}
 
 
+MAX_BLOCK = 8000
+
+
+def blocks(session: Any) -> Dict[str, Dict[str, Any]]:
+    """label -> {limit, file, title}: the two built-in stores plus the profile's extra blocks."""
+    out = {t: {"limit": LIMITS[t], "file": FILES[t], "title": TITLES[t]} for t in ("memory", "user")}
+    opt = session.profile.get("memory") if isinstance(session.profile.get("memory"), dict) else {}
+    for label, spec in (opt.get("blocks") or {}).items():
+        label = str(label).strip().lower().replace(" ", "_")
+        if not label.replace("_", "").replace("-", "").isalnum():
+            continue
+        spec = spec if isinstance(spec, dict) else {"limit": spec}
+        try:
+            limit = max(100, min(int(spec.get("limit") or 1000), MAX_BLOCK))
+        except (TypeError, ValueError):
+            limit = 1000
+        desc = str(spec.get("description") or "").strip()
+        base = out.get(label, {})
+        out[label] = {"limit": limit, "file": base.get("file") or f"{label.upper()}.md",
+                      "title": base.get("title") or (f"{label.upper()} ({desc})" if desc else label.upper())}
+    return out
+
+
 def memory_dir(session: Any) -> Path:
     custom = (session.profile.get("memory") or {}).get("dir") if isinstance(session.profile.get("memory"), dict) else None
     return Path(os.path.expanduser(custom)) if custom else Path(session.agent_dir) / "memories"
 
 
-def read_entries(d: Path, target: str) -> List[str]:
+def read_entries(d: Path, target: str, file: str = "") -> List[str]:
     try:
-        raw = (d / FILES[target]).read_text(encoding="utf-8")
+        raw = (d / (file or FILES[target])).read_text(encoding="utf-8")
     except OSError:
         return []
     return [e.strip() for e in raw.split("§") if e.strip()]
 
 
-def write_entries(d: Path, target: str, entries: List[str]) -> None:
+def write_entries(d: Path, target: str, entries: List[str], file: str = "") -> None:
     d.mkdir(parents=True, exist_ok=True)
-    p = d / FILES[target]
+    p = d / (file or FILES[target])
     tmp = p.with_suffix(".tmp")
     tmp.write_text(SEP.join(entries), encoding="utf-8")
     os.replace(tmp, p)
@@ -50,28 +78,30 @@ def used(entries: List[str]) -> int:
     return len(SEP.join(entries))
 
 
-def _block(target: str, entries: List[str]) -> str:
-    n, limit = used(entries), LIMITS[target]
+def _block(spec: Dict[str, Any], entries: List[str]) -> str:
+    n, limit = used(entries), spec["limit"]
     bar = "═" * 46
-    return f"{bar}\n{TITLES[target]} [{n * 100 // limit}% — {n}/{limit} chars]\n{bar}\n" + SEP.join(entries)
+    return f"{bar}\n{spec['title']} [{n * 100 // limit}% — {n}/{limit} chars]\n{bar}\n" + SEP.join(entries)
 
 
 def _prompt(session: Any) -> str:
     d = memory_dir(session)
-    blocks = [_block(t, e) for t in ("memory", "user") for e in [read_entries(d, t)] if e]
-    return "\n\n".join(blocks)
+    out = [_block(spec, e) for label, spec in blocks(session).items() for e in [read_entries(d, label, spec["file"])] if e]
+    return "\n\n".join(out)
 
 
 def _tools(session: Any) -> Dict[str, ToolDef]:
     def execute(_id, p, signal=None, on_update=None, ctx=None):
         action, target = p.get("action"), p.get("target") or "memory"
-        if target not in LIMITS:
-            raise ToolError("target must be 'memory' or 'user'")
+        spec = blocks(session).get(target)
+        if spec is None:
+            raise ToolError(f"target must be one of: {', '.join(blocks(session))}")
+        limit, file = spec["limit"], spec["file"]
         d = memory_dir(session)
         content = str(p.get("content") or "").strip()
         old = str(p.get("old_text") or "").strip()
-        with file_mutation_lock(str(d / FILES[target])):
-            entries = read_entries(d, target)
+        with file_mutation_lock(str(d / file)):
+            entries = read_entries(d, target, file)
             if action == "add":
                 if not content:
                     raise ToolError("content is required for add")
@@ -95,11 +125,11 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
                     new[hits[0]] = content
             else:
                 raise ToolError("action must be add, replace or remove")
-            if used(new) > LIMITS[target]:
-                raise ToolError(f"{target} store would be {used(new)}/{LIMITS[target]} chars. Remove or shorten an entry "
+            if used(new) > limit:
+                raise ToolError(f"{target} store would be {used(new)}/{limit} chars. Remove or shorten an entry "
                                 "first:\n" + "\n".join(f"- {e[:80]}" for e in entries))
-            write_entries(d, target, new)
-        return text_result(f"{action} ok. {target}: {used(new)}/{LIMITS[target]} chars, {len(new)} entries. "
+            write_entries(d, target, new, file)
+        return text_result(f"{action} ok. {target}: {used(new)}/{limit} chars, {len(new)} entries. "
                            "(The prompt copy refreshes next session.)", {"target": target, "entries": len(new), "chars": used(new)})
 
     return {"memory": ToolDef(
@@ -109,7 +139,7 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
                     "entries compact, merge related facts, and replace or remove stale ones. Never store secrets.",
         parameters={"type": "object", "properties": {
             "action": {"type": "string", "enum": ["add", "replace", "remove"]},
-            "target": {"type": "string", "enum": ["memory", "user"]},
+            "target": {"type": "string", "enum": list(blocks(session))},
             "content": {"type": "string"}, "old_text": {"type": "string", "description": "unique part of the entry to replace/remove"}},
             "required": ["action", "target"]},
         execute=execute, prompt_snippet="Remember durable facts across sessions",

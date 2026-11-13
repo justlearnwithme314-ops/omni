@@ -82,7 +82,7 @@ omni login <provider>         subscription sign-in: anthropic, google-antigravit
 omni legacy                   the previous REPL; subcommands like `omni models` still use the previous CLI
 ```
 
-`/profile save <name>` stores your current setup as a custom profile in `~/.omni/profiles/`. Profiles are JSON
+`/profile new` walks you through building your own profile (base, modules, name); `/profile save <name>` stores the current setup as one. Both write to `~/.omni/profiles/`. Profiles are JSON
 files that `extends` each other; see [docs/CAPABILITIES.md](docs/CAPABILITIES.md) for the format, the module list,
 measured context costs, and what is and is not yet covered from Pi, Oh My Pi, Hermes and OpenClaw.
 

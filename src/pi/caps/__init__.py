@@ -37,6 +37,10 @@ class Capability:
     prompt: Optional[Callable[[Any], str]] = None                       # session -> system prompt section ("" = none)
     skill_roots: Optional[Callable[[Any], List[Path]]] = None           # session -> extra skill folders
     skill_filter: Optional[Callable[[Any, Any], Optional[str]]] = None  # (session, skill) -> reason to hide it
+    template_roots: Optional[Callable[[Any], List[Path]]] = None        # session -> extra prompt-template (slash command) folders
+    agent_roots: Optional[Callable[[Any], List[Path]]] = None           # session -> extra named-agent folders (for `task`)
+    hook_files: Optional[Callable[[Any], List[Any]]] = None             # session -> [(hooks file, plugin root or None)]
+    mcp_files: Optional[Callable[[Any], List[Path]]] = None             # session -> extra MCP config files ({"mcpServers": ...})
     available: Optional[Callable[[Any], Optional[str]]] = None          # session -> why it cannot run here
     live_prompt: Optional[Callable[[Any], str]] = None                  # like `prompt`, but re-read every request
     gate: Optional[Callable[[Any, str, Dict[str, Any]], Optional[str]]] = None  # (session, tool, args) -> reason to block
@@ -55,7 +59,7 @@ class Capability:
 
 CAPABILITIES: Dict[str, Capability] = {}
 _BUILTIN_MODULES = ["todo", "ask", "fetch", "memory", "task", "skills", "checkpoint", "hashline", "ast", "plan", "search",
-                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "hosts"]
+                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "hosts"]
 _loaded = False
 
 
@@ -262,6 +266,18 @@ class CapabilityManager:
             cap = caps.get(cid)
             if cap is not None and cap.skill_roots is not None:
                 out += [p for p in cap.skill_roots(self.session) if p not in out]
+        return out
+
+    def collect(self, attr: str) -> List[Any]:
+        """Everything the profile's capabilities contribute through a list-returning hook (works before `load`)."""
+        caps, out = load_builtin(), []
+        for cid in self.session.profile.get("capabilities") or []:
+            fn = getattr(caps.get(cid), attr, None)
+            if fn is not None:
+                try:
+                    out += [x for x in fn(self.session) if x not in out]
+                except Exception as e:
+                    self.session.diagnostics.append(f"capability '{cid}' {attr}: {type(e).__name__}: {e}")
         return out
 
     def filter_skills(self, skills: List[Any], diagnostics: List[str]) -> List[Any]:

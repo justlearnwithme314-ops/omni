@@ -45,12 +45,14 @@ def _expand(v: Any) -> Any:
     return v
 
 
-def load_config(agent_dir: Path, cwd: str, trusted: bool) -> Tuple[Dict[str, Dict[str, Any]], List[str], Dict[str, Any]]:
-    """Returns (servers by name, errors, top-level options such as autoEnableCodemode)."""
+def load_config(agent_dir: Path, cwd: str, trusted: bool, extra_files: Optional[List[Path]] = None
+                ) -> Tuple[Dict[str, Dict[str, Any]], List[str], Dict[str, Any]]:
+    """Returns (servers by name, errors, top-level options such as autoEnableCodemode).
+    `extra_files` (other tools' configs, e.g. Claude Code's `.mcp.json`) load first, so mcp.json overrides them."""
     errors: List[str] = []
     servers: Dict[str, Dict[str, Any]] = {}
     top: Dict[str, Any] = {}
-    files = [(Path(agent_dir) / "mcp.json", "user")]
+    files = [(Path(p), "plugin") for p in extra_files or []] + [(Path(agent_dir) / "mcp.json", "user")]
     if trusted:
         files.append((Path(cwd) / ".pi" / "mcp.json", "project"))
     for path, scope in files:
@@ -469,8 +471,10 @@ class McpServer:
 class McpManager:
     """All MCP servers of a session; exposes core ToolDefs and the system-prompt section."""
 
-    def __init__(self, agent_dir: Path, cwd: str, trusted: bool, on_change: Optional[Callable[[], None]] = None):
+    def __init__(self, agent_dir: Path, cwd: str, trusted: bool, on_change: Optional[Callable[[], None]] = None,
+                 extra_files: Optional[List[Path]] = None):
         self.agent_dir, self.cwd, self.trusted = Path(agent_dir), cwd, trusted
+        self.extra_files = list(extra_files or [])
         self.servers: Dict[str, McpServer] = {}
         self.registered: Dict[str, Dict[str, Any]] = {}  # from extensions
         self.errors: List[str] = []
@@ -480,7 +484,7 @@ class McpManager:
 
     # ---------------------------------------------------------------------------------- config
     def load(self) -> None:
-        cfgs, errors, top = load_config(self.agent_dir, self.cwd, self.trusted)
+        cfgs, errors, top = load_config(self.agent_dir, self.cwd, self.trusted, self.extra_files)
         self.errors, self.options = errors, top
         for name, cfg in self.registered.items():
             if any(server_key(n) == server_key(name) for n in cfgs):

@@ -11,6 +11,7 @@
     "checkpoint",
     "plan",
     "ast",
-    "web-search"
+    "web-search",
+    "claude-compat"
   ]
 }

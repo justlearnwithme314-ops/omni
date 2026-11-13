@@ -54,6 +54,12 @@ Claude Code format), `web-search`, `session-search`, named agents for `task`. Ca
 `memory-archive` (Letta), `durable` (Temporal), `browser` (Browser Use), `sandbox` (Daytona). See
 `CAPABILITIES.md`. The reference repos are under `D:\Harness\references`.
 
+**Update (2026-11-13):** `claude-compat` (Claude Code commands, plugins, `.mcp.json`), `scheduler` (the plan's
+`Scheduler` point in its first form: cron jobs in fresh sessions, `omni cron run`), labeled memory blocks,
+model roles for subagents, and a profile wizard (`/profile new | edit | show | delete`). Capabilities gained
+`template_roots`, `agent_roots`, `hook_files` and `mcp_files`. Reference clones now include `letta-code`,
+`letta-archive` and `daytona-v0.190.0`.
+
 **Update (2026-11-10, later):** phase 2's profile part and phase 6's "point every profile at the new kernel" are done
 in a first form: `profiles/*.json` (`pi → lean → balanced → autonomous/full → evolve`), bare `omni` runs the core with
 the active profile, Omni's MasterToolRegistry (MCP, Hermes, OpenClaw, Omni tools) is bridged in as core tools for
