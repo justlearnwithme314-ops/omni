@@ -8,6 +8,11 @@
     "+plan",
     "+ast",
     "+hooks",
-    "+browser"
+    "+browser",
+    "+advisor",
+    "+image-gen",
+    "+lsp",
+    "+watch-pr",
+    "+structured-output"
   ]
 }

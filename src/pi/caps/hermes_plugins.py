@@ -222,6 +222,27 @@ class PluginContext:
                               lambda args, _n=name, **kw: (host.ensure_memory_ready(), provider.handle_tool_call(_n, args, **kw))[1], "")
                 self.record["tools"].append(name)
 
+    def register_image_gen_provider(self, provider: Any, *_a: Any, **_k: Any) -> None:
+        """A Hermes ImageGenProvider (fal, xai, openrouter, ...): plugged into the `image-gen` capability's providers."""
+        from ..tools.base import ToolError
+        from . import image_gen
+        name = str(getattr(provider, "name", "") or self.record.get("name") or "hermes").lower()
+        aspect = {"1536x1024": "landscape", "1024x1536": "portrait"}
+
+        def generate(prompt: str, size: str, session: Any) -> Dict[str, Any]:
+            r = provider.generate(prompt, aspect.get(size, "square"))
+            if not isinstance(r, dict) or not r.get("success") or not r.get("image"):
+                raise ToolError(str((r or {}).get("error") or "the provider returned no image") if isinstance(r, dict) else "the provider returned no image")
+            image = str(r["image"])
+            return {"url": image} if image.lower().startswith(("http://", "https://")) else {"path": image}
+
+        def available(session: Any) -> bool:
+            check = getattr(provider, "is_available", None)
+            return bool(check()) if callable(check) else True
+
+        image_gen.register_provider(name, generate, available, f"Hermes plugin provider ({self.record.get('name') or name})")
+        self.record.setdefault("image_providers", []).append(name)
+
     def __getattr__(self, name: str) -> Any:
         if name.startswith("register_"):  # a plugin kind this core has no slot for yet: accept, record, carry on
             def stub(*_a: Any, **_k: Any) -> None:

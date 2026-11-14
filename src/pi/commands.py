@@ -675,6 +675,10 @@ class Commands:
         lines = [f"{k:<34} {v}" for k, v in HOTKEYS]
         for key, sc in getattr(self.s.ext, "shortcuts", {}).items():
             lines.append(f"{key:<34} {sc.get('description') or 'extension shortcut'}")
+        from .tui.keybindings import describe, load
+        km = load(self.s.agent_dir)
+        if km.bindings or km.problems:
+            lines += ["", "keybindings.json:"] + describe(km).splitlines()
         self.port.show("hotkeys", lines)
 
     def cmd_changelog(self, args: str) -> None:

@@ -229,6 +229,23 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
 - **`structured-output`** (Browser Use): with a JSON schema in the profile (`"output_schema"`) or in
   `.omni/output-schema.json`, the agent finishes by calling `respond`; the validated value is in
   `session.structured_output` and written to `OMNI_OUTPUT_FILE` when set.
+- **`advisor`** (OpenClaw): every few turns (`"advisor": {"every": 6, "model": "provider/id"}`) a short separate model
+  call reviews the recent work; advice is shown and handed to the agent with your next message. `/advise` runs it now.
+- **`watch-pr`** (Letta): `watch_pr` follows a pull request through `gh` and wakes the agent when checks, reviews,
+  comments or its state change. Polls once a minute while the window is open.
+- **`lsp`** (Oh My Pi): the `lsp` tool talks to real language servers (pyright / pylsp, typescript-language-server,
+  gopls, rust-analyzer, clangd, or your own in the profile's `"lsp"`): definition, references, hover, symbols,
+  workspace symbols, diagnostics, rename preview. `/lsp` shows what is running and installed.
+- **`image-gen`** (Hermes): `image_generate` saves an image into the project. Built-in providers: OpenAI
+  (`OPENAI_API_KEY`) and Gemini (`GEMINI_API_KEY`); a Hermes plugin's `register_image_gen_provider` adds more.
+  `/image-providers` lists them.
+
+Outside the capability system:
+- **`keybindings.json`** (Pi): `<agent-dir>/keybindings.json` reassigns keys using Pi's action names
+  (`"app.model.select": "ctrl+k"`), plus `"/command": "key"`. `/hotkeys` shows the result.
+- **Gateway channels**: `slack` and `discord` (polling the HTTP APIs, no extra library) next to telegram, http and
+  webhook; any `<agent-dir>/channels/*.py` can add a channel type (the slot for Hermes platform / OpenClaw channel
+  plugins, whose own adapter classes are not loaded as they are).
 - `/diff [staged|all]` (with `workflows`) shows the working-tree changes. `"browser": {"allowed_domains": ["*.example.com"]}` limits where the browser may go.
 
 ## Startup time and health
@@ -272,7 +289,7 @@ Done means covered by an offline test in `tests/`.
 
 | Area | Done | Not done yet |
 |---|---|---|
-| **Pi** | core loop, 7 tools, sessions, TUI, extensions host, MCP, packages, codemode, OAuth sign-ins (see `PI_PROFILE.md`) | keybindings.json, sixel images |
+| **Pi** | core loop, 7 tools, sessions, TUI, extensions host, MCP, packages, codemode, OAuth sign-ins (see `PI_PROFILE.md`) | sixel images |
 | **Oh My Pi** | extensions load through the same host; `todo`, `task`, `ask`, `fetch`, `checkpoint` / `rewind`, plan mode, `ast_grep` / `ast_edit` (via the CLI), hashline edits (ranges, inserts, cut/paste registers, create / delete / move), `web_search`, named agents for `task`; OAuth flows ported | hashline syntax-block ops (`N*`), `lsp`, `github`, `eval`, model roles, TTSR, snapcompact, the remaining slash commands, its extra extension API |
 | **Hermes** | `memory` (file-compatible), `todo`, `delegate_task` equivalent, `skill_manage`, `session_search`, `web_search`, skill gating by `platforms`; plugin host with tools, commands, prompt sections and the eight core hooks | the other plugin kinds (memory providers, context engines, platforms, image / video generation), streaming and API-request hooks, messaging platforms, cron delivery to chat channels, self-evolution job |
 | **OpenClaw** | skills with `metadata.openclaw` gating; plugins through the legacy adapter | the rest of the plugin SDK (channel, provider and service plugins), more gateway channels, exec approvals, nodes, ACP |
