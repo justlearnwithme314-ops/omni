@@ -212,6 +212,16 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
 - **`notify`**: terminal bell and desktop notification when a run of 20 s or more finishes in the window.
 - **`task`** accepts `tasks: [...]` to run up to 6 independent subagents at the same time. **`durable`** takes per-tool retry settings (`"durable": {"tools": {"fetch": {"retries": 4}}}`). **`browser`** has a `key` action.
 
+## Shell, files and safety extras
+
+- **`processes`** (Hermes, Letta): the `process` tool starts long-running commands in the background, then `log`, `wait` (until exit or until text appears) and `kill`; `/ps` lists them. They stop with the session.
+- **`quiet-output`** (OpenClaw tokenjuice): colour codes and progress redraws are removed from shell output and runs of near-identical lines collapse to first / count / last.
+- **`secrets`** (Oh My Pi): credential values from the environment, `<agent-dir>/secrets.txt` and known token shapes are replaced with `[REDACTED:NAME]` in tool results before the model or the session file sees them.
+- **`file-inspect`** (Oh My Pi): `inspect` shows SQLite databases, zip / tar archives, notebooks and CSV files as text.
+- **`keywords`** (Oh My Pi): `ultrathink`, `chillax`, `orchestrate`, `readonly`, plus your own in a profile's `"keywords"`.
+- **`feeds`** (OpenClaw): follow RSS / Atom feeds and see only new items.
+- `/diff [staged|all]` (with `workflows`) shows the working-tree changes. `"browser": {"allowed_domains": ["*.example.com"]}` limits where the browser may go.
+
 ## Startup time and health
 
 - The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.

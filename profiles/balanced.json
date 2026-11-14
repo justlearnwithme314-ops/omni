@@ -17,7 +17,12 @@
     "workflows",
     "github",
     "notify",
-    "budget"
+    "budget",
+    "processes",
+    "quiet-output",
+    "secrets",
+    "file-inspect",
+    "keywords"
   ],
   "omni_registry": {
     "enabled": true,
