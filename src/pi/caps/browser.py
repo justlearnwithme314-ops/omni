@@ -106,6 +106,17 @@ class Browser:
         self.relay: Any = None
         opt = session.profile.get("browser") if isinstance(session.profile.get("browser"), dict) else {}
         self.headless = bool(opt.get("headless", False))
+        self.allowed = [str(d).lower() for d in opt.get("allowed_domains") or []]   # e.g. ["*.example.com", "docs.python.org"]
+
+    def check_url(self, url: str) -> None:
+        """Refuse to visit a site outside the profile's allowlist (no list = everything allowed)."""
+        if not self.allowed or url.startswith("about:"):
+            return
+        import fnmatch
+        import urllib.parse
+        host = (urllib.parse.urlparse(url).hostname or "").lower()
+        if not any(fnmatch.fnmatch(host, pat) or (pat.startswith("*.") and host == pat[2:]) for pat in self.allowed):
+            raise ToolError(f"{host or url} is not in this profile's allowed browser domains ({', '.join(self.allowed)})")
 
     def connect(self) -> Any:
         if self.relay is None:
@@ -137,6 +148,11 @@ class Browser:
         st = self.js(STATE_JS % MAX_ELEMENTS)
         if not isinstance(st, dict):
             raise ToolError("browser: the page did not return a state (is a tab open?)")
+        try:
+            self.check_url(str(st.get("url") or ""))
+        except ToolError:
+            self.js("history.back()")  # a click or redirect left the allowed sites: go back and say so
+            raise
         return format_state(st)
 
     def act(self, result: Any, index: int) -> None:
@@ -165,6 +181,7 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
                 raise ToolError("url is required for open")
             if "://" not in url:
                 url = "https://" + url
+            b.check_url(url)
             try:
                 b.connect().navigate(url)
             except ToolError:

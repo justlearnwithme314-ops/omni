@@ -17,7 +17,8 @@
     "+claude-compat",
     "+openclaw-plugins",
     "+memory-reflect",
-    "+self-evolve"
+    "+self-evolve",
+    "+feeds"
   ],
   "skills_budget_chars": 8000,
   "omni_registry": {

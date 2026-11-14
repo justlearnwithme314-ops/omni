@@ -28,7 +28,13 @@
     "rules",
     "workflows",
     "notify",
-    "budget"
+    "budget",
+    "processes",
+    "quiet-output",
+    "secrets",
+    "file-inspect",
+    "keywords",
+    "feeds"
   ],
   "skills_budget_chars": 8000
 }

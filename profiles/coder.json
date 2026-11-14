@@ -21,6 +21,11 @@
     "workflows",
     "github",
     "notify",
-    "budget"
+    "budget",
+    "processes",
+    "quiet-output",
+    "secrets",
+    "file-inspect",
+    "keywords"
   ]
 }
