@@ -712,6 +712,21 @@ class InteractiveApp:
         text = self.editor.text
         threading.Thread(target=lambda: self.post(lambda: self._apply_ext_editor(ext.editor_set_text(text))), daemon=True).start()
 
+    def keymap(self) -> Any:
+        """<agent-dir>/keybindings.json, re-read when the file changes (so /reload is not even needed)."""
+        from .keybindings import load
+        path = Path(self.session.agent_dir) / "keybindings.json"
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            stamp = 0.0
+        cached = getattr(self, "_keymap", None)
+        if cached is None or cached[0] != stamp:
+            cached = self._keymap = (stamp, load(self.session.agent_dir))
+            for problem in cached[1].problems:
+                self.notify(problem, "warning")
+        return cached[1]
+
     def _app_key(self, k: Key) -> None:
         n = k.name
         ed = self.editor
@@ -733,6 +748,18 @@ class InteractiveApp:
             else:
                 self.accept_completion(submit=(n == "enter"))
             return
+        km = self.keymap()
+        if km:
+            hit = km.resolve(n)
+            if hit == "":
+                if n.startswith(("ctrl+", "alt+")) or len(n) > 1:
+                    return
+            elif hit is not None and hit.startswith("/"):
+                name, _, rest = hit[1:].partition(" ")
+                self.in_worker(lambda: self.commands.run(name, rest))
+                return
+            elif hit is not None:
+                n = hit
         ext_sc = getattr(s.ext, "shortcuts", {})
         if n in ext_sc:
             self.in_worker(lambda: s.ext.run_shortcut(n))

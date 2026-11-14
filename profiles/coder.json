@@ -23,6 +23,8 @@
     "notify",
     "budget",
     "processes",
+    "lsp",
+    "watch-pr",
     "board",
     "wake",
     "mcp-audit",

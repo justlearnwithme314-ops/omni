@@ -361,3 +361,11 @@ Still open: OpenClaw advisor (periodic review) and channel / provider plugins an
 image-generation plugin kinds; Oh My Pi language-server tool and remaining slash commands; Pi keybindings file;
 Letta watch-PR. `structured-output` is not yet printed by print mode, and `mcp-audit` does not run automatically
 when a server is added.
+
+## Update 2026-11-14 (round G)
+
+Merged: advisor, watch-pr, lsp, image-gen (with the Hermes image provider slot), Pi keybindings.json, Slack and
+Discord gateway channels, channel plugins.
+
+Still open: OpenClaw provider plugins and remote nodes; loading Hermes platform adapters and OpenClaw channel plugins
+as they are (only the Omni channel slot exists); remaining Oh My Pi slash commands; pull diagnostics in `lsp`.

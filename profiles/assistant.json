@@ -30,6 +30,7 @@
     "notify",
     "budget",
     "processes",
+    "image-gen",
     "board",
     "wake",
     "mcp-audit",

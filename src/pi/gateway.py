@@ -238,6 +238,12 @@ def register_channel(name: str, factory: Callable[[Dict[str, Any]], Channel]) ->
     CHANNEL_TYPES[name] = factory
 
 
+def _install_more_channels() -> None:
+    import sys
+    from . import gateway_channels
+    gateway_channels.install(sys.modules[__name__])   # slack, discord
+
+
 # ------------------------------------------------------------------------------------------- gateway
 def config_path(agent_dir: Path) -> Path:
     return Path(agent_dir) / "gateway.json"
@@ -274,6 +280,10 @@ class Gateway:
         self.cwd = str(self.config.get("cwd") or cwd or os.getcwd())
         self.channels: Dict[str, Channel] = {}
         self.errors: List[str] = []
+        import sys
+        from . import gateway_channels
+        _install_more_channels()
+        self.errors += gateway_channels.load_plugins(sys.modules[__name__], self.agent_dir)   # <agent-dir>/channels/*.py
         for name, cfg in (self.config.get("channels") or {}).items():
             factory = CHANNEL_TYPES.get(str(cfg.get("type") or name)) if isinstance(cfg, dict) else None
             if factory is None:
