@@ -19,6 +19,7 @@
     "notify",
     "budget",
     "processes",
+    "context-trim",
     "board",
     "wake",
     "quiet-output",

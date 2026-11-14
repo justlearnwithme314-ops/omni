@@ -883,6 +883,7 @@ class AgentSession:
         llm = convert_to_llm(messages)
         if self.settings.get("images.blockImages", False):
             llm = block_images(llm)
+        llm = self.caps.context(llm)
         return {"systemPrompt": self.system_prompt(), "messages": llm, "tools": self.tool_declarations()}
 
     def tool_declarations(self) -> List[Dict[str, Any]]:
@@ -911,6 +912,19 @@ class AgentSession:
         ind = self.indirect_tools()
         return {n for n in self.active_tool_names if n in ind}
 
+    def _next_fallback(self, failed: Dict[str, Any], tried: List[str]) -> Optional[Dict[str, Any]]:
+        """Model failover (OpenClaw / Hermes): `"fallbackModels": ["provider/id", ...]` in the profile or settings.
+        Used when a request fails for good (after retries); the session's chosen model is not changed."""
+        names = self.profile.get("fallbackModels") or self.settings.get("fallbackModels") or []
+        if not isinstance(names, list):
+            return None
+        skip = set(tried) | {model_key(failed)}
+        for name in names:
+            m = self.registry.resolve(str(name))
+            if m is not None and model_key(m) not in skip and self.auth.get_api_key(m["provider"]):
+                return m
+        return None
+
     def _request_assistant(self) -> Optional[Dict[str, Any]]:
         assert self.signal is not None
         if not self.model:
@@ -933,6 +947,7 @@ class AgentSession:
         retry = self.settings.get("retry") or {}
         max_retries = int(retry.get("maxRetries", 3)) if retry.get("enabled", True) else 0
         attempt = 0
+        tried_fallbacks: List[str] = []
         while True:
             api_key = self.auth.get_api_key(model["provider"])
             if not api_key:
@@ -1008,6 +1023,14 @@ class AgentSession:
                             self._append_message(err)
                             return err
                         model, level = rr
+                    continue
+                nxt = self._next_fallback(model, tried_fallbacks) if not partial["content"] and not self.signal.aborted else None
+                if nxt is not None:   # failover: the model is unavailable, carry on with the next one in the list
+                    tried_fallbacks.append(model_key(model))
+                    self._notify({"type": "notice", "level": "warning",
+                                  "message": f"{model_key(model)} failed ({str(e)[:120]}); continuing with {model_key(nxt)}"})
+                    model, attempt = nxt, 0
+                    level = clamp_thinking(model, level)
                     continue
                 err = dict(partial, stopReason="error", errorMessage=str(e))
                 if not started:

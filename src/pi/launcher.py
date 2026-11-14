@@ -177,6 +177,10 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
         from . import resources as res
         from .node_server import cli as node_cli
         hard_exit(node_cli(raw[1:], res.agent_dir()))
+    if raw[:1] == ["agent"] and len(raw) > 1 and raw[1] in ("export", "import", "inspect"):
+        from . import resources as res
+        from .agentfile import cli as agent_cli
+        hard_exit(agent_cli(raw[1:], res.agent_dir()))
     if raw[:1] == ["cron"] or raw[:1] == ["signal"]:
         from . import resources as res
         from .caps.scheduler import cli as cron_cli

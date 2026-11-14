@@ -30,6 +30,8 @@
     "notify",
     "budget",
     "processes",
+    "context-trim",
+    "voice",
     "image-gen",
     "board",
     "wake",
