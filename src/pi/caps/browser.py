@@ -225,6 +225,18 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
                     pass
             return {"content": [{"type": "text", "text": "Screenshot of the current page."},
                                 {"type": "image", "data": data, "mimeType": "image/png"}], "details": {"action": action}}
+        if action == "key":
+            key = str(p.get("text") or "Enter")
+            codes = {"Enter": 13, "Escape": 27, "Tab": 9, "Backspace": 8, "ArrowDown": 40, "ArrowUp": 38, "ArrowLeft": 37,
+                     "ArrowRight": 39, "PageDown": 34, "PageUp": 33, "Home": 36, "End": 35, "Space": 32, "Delete": 46}
+            if key not in codes:
+                raise ToolError("key must be one of: " + ", ".join(codes))
+            b.js("(() => { const e = document.activeElement || document.body; const o = {key: %s, code: %s, keyCode: %d, which: %d, "
+                 "bubbles: true, cancelable: true}; for (const t of ['keydown', 'keypress', 'keyup']) e.dispatchEvent(new KeyboardEvent(t, o)); "
+                 "if (%s === 'Enter' && e.form) { e.form.requestSubmit ? e.form.requestSubmit() : e.form.submit(); } return 'ok'; })()"
+                 % (json.dumps(" " if key == "Space" else key), json.dumps(key), codes[key], codes[key], json.dumps(key)))
+            b.settle(3.0)
+            return text_result(b.state(), {"action": action, "key": key})
         if action == "wait":
             want, limit = str(p.get("text") or ""), max(0.2, min(float(p.get("seconds") or (10 if p.get("text") else 2)), 60))
             if not want:
@@ -243,17 +255,17 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
             _unload(session)
             session._browser = Browser(session)
             return text_result("Browser connection closed.", {"action": action})
-        raise ToolError("action must be one of: open, state, click, type, select, scroll, back, text, wait, screenshot, tabs, close")
+        raise ToolError("action must be one of: open, state, click, type, select, scroll, back, text, key, wait, screenshot, tabs, close")
 
     return {"browser": ToolDef(
         name="browser", label="Browser",
         description="Control a real web browser. Pages are shown as numbered interactive elements, e.g. "
                     "`[3]<button type=submit>Sign in</button>`; act on the number. Actions: open(url), state, "
                     "click(index), type(index, text, submit?), select(index, text), scroll(direction up|down), back, "
-                    "text(offset?) to read the page content, wait(text?, seconds?) until text appears, screenshot (an image, for visual checks), tabs, close. Every action returns the page's new state; "
+                    "text(offset?) to read the page content, key(text: Enter|Escape|Tab|ArrowDown|...) on the focused element, wait(text?, seconds?) until text appears, screenshot (an image, for visual checks), tabs, close. Every action returns the page's new state; "
                     "indexes are valid only for the latest state.",
         parameters={"type": "object", "properties": {
-            "action": {"type": "string", "enum": ["open", "state", "click", "type", "select", "scroll", "back", "text", "wait", "screenshot", "tabs", "close"]},
+            "action": {"type": "string", "enum": ["open", "state", "click", "type", "select", "scroll", "back", "text", "key", "wait", "screenshot", "tabs", "close"]},
             "url": {"type": "string"}, "index": {"type": "integer"}, "text": {"type": "string"},
             "submit": {"type": "boolean"}, "direction": {"type": "string"}, "offset": {"type": "integer"},
             "seconds": {"type": "number"}},

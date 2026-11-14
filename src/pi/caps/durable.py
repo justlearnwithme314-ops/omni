@@ -138,7 +138,10 @@ def _after_tool(session: Any, tool_name: str, args: Dict[str, Any], result: Dict
     if tool is None or not tool.read_only:
         return None  # only calls that are safe to repeat
     opt = session.profile.get("durable") if isinstance(session.profile.get("durable"), dict) else {}
-    retries, backoff = int(opt.get("retries", 2)), float(opt.get("backoff", 0.5))
+    per_tool = (opt.get("tools") or {}).get(tool_name) if isinstance(opt.get("tools"), dict) else None
+    per_tool = per_tool if isinstance(per_tool, dict) else {}   # "durable": {"tools": {"fetch": {"retries": 4, "backoff": 1}}}
+    retries = int(per_tool.get("retries", opt.get("retries", 2)))
+    backoff = float(per_tool.get("backoff", opt.get("backoff", 0.5)))
     text = "".join(b.get("text", "") for b in result.get("content") or [] if b.get("type") == "text")
     if retries <= 0 or not TRANSIENT.search(text):
         return None

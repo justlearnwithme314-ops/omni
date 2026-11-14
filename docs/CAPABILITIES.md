@@ -204,6 +204,14 @@ with `gateway.register_channel(name, factory)`. `omni gateway status` shows the 
 
 The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url": "$SLACK_WEBHOOK_URL", "format": "slack" | "discord" | "json"}`) for delivering scheduled-job results, and `omni doctor` prints the `/doctor` report without opening the window.
 
+## Guard rails and conveniences
+
+- **`budget`**: `"budget": {"session_usd": 2, "run_tool_calls": 60, "run_minutes": 20}`. At a limit the next tool call is refused and the model reports where it is; `/budget` shows the counters, `/budget extend` continues. Defaults: 80 tool calls and 30 minutes per run.
+- **`github`** (Oh My Pi): a read-only `github` tool over the `gh` CLI (PRs, diffs, checks, issues, CI runs, search).
+- **`workflows`**: `/review`, `/commit`, `/explain`, `/test`, `/fix`, `/catchup` as bundled prompts; your own prompt with the same name replaces one.
+- **`notify`**: terminal bell and desktop notification when a run of 20 s or more finishes in the window.
+- **`task`** accepts `tasks: [...]` to run up to 6 independent subagents at the same time. **`durable`** takes per-tool retry settings (`"durable": {"tools": {"fetch": {"retries": 4}}}`). **`browser`** has a `key` action.
+
 ## Startup time and health
 
 - The window opens as soon as the session, model and built-in tools are ready (about half a second); extensions, plugin hosts and MCP load in the background. A message sent meanwhile runs as soon as they are in.
