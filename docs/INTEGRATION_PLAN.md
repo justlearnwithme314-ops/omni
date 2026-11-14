@@ -377,3 +377,11 @@ Merged: remote nodes (`omni node serve`, `node` tool), OpenClaw provider plugins
 
 Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; TLS and
 pairing codes for nodes; pull diagnostics in `lsp`.
+
+## Update 2026-11-15 (round I)
+
+Merged: context-trim, consensus, voice (speak / transcribe), model failover (`fallbackModels`), agent file
+(`omni agent export | import | inspect`).
+
+Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; TLS and
+pairing codes for nodes; pull diagnostics in `lsp`; voice input in the terminal window (push to talk).

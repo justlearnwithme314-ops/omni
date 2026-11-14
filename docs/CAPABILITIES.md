@@ -242,8 +242,22 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
 - **`nodes`** (OpenClaw): the `node` tool runs commands and reads / writes files on another machine that runs
   `omni node serve` (token-protected, plain HTTP: keep it on loopback or behind a tunnel / VPN). Register machines
   with `omni node add NAME URL TOKEN` or in the profile's `"nodes"`. `/nodes` shows which ones answer.
+- **`context-trim`** (OpenClaw): old, long tool results are shortened in what is sent to the model (the session
+  file keeps everything). `"context_trim": {"keep_turns": 8, "max_chars": 1500, "step": 4}`; the boundary moves in
+  steps so the provider's prompt cache keeps working.
+- **`consensus`** (Hermes): the `consensus` tool asks several models the same question in parallel and returns the
+  answers side by side. `"consensus": {"models": ["provider/id", ...]}`. One request per model.
+- **`voice`** (Hermes, OpenClaw): `speak` (text to speech: OpenAI, or the operating system's own voice offline) and
+  `transcribe` (speech to text, OpenAI). `/voices` lists providers.
 
 Outside the capability system:
+- **Model failover** (OpenClaw, Hermes): `"fallbackModels": ["provider/id", ...]` in a profile or in settings. When a
+  request fails for good (after retries), the next model in the list that you are signed in to takes over for that
+  request; your chosen model stays selected.
+- **Agent file** (Letta): `omni agent export [FILE]` packs memory, the archive, custom profiles, skills, the
+  capability overlay, scheduled jobs, key bindings and the task board into one `.omni-agent` file;
+  `omni agent import FILE [--replace] [--dry-run]` and `omni agent inspect FILE` read it. Credentials and session
+  transcripts are never included.
 - **OpenClaw provider plugins**: with `openclaw-plugins` on, model providers a plugin declares in its manifest
   (`modelCatalog.providers`, OpenAI-compatible, Responses, Anthropic or Google wire formats) appear in `/model`; the
   key comes from the environment variable the manifest names. The plugin's own code is not run for this.

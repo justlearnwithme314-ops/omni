@@ -23,6 +23,7 @@
     "notify",
     "budget",
     "processes",
+    "context-trim",
     "lsp",
     "watch-pr",
     "board",

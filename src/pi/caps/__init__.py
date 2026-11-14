@@ -59,11 +59,13 @@ class Capability:
     group: str = "feature"                                              # feature | host
     requires: List[str] = field(default_factory=list)                   # capability ids this one builds on
     origin: str = "builtin"                                             # "builtin" or the file a user module came from
+    # (session, llm messages) -> replacement list or None; runs on every request, must not edit messages in place
+    context: Optional[Callable[[Any, List[Dict[str, Any]]], Optional[List[Dict[str, Any]]]]] = None
 
 
 CAPABILITIES: Dict[str, Capability] = {}
 _BUILTIN_MODULES = ["todo", "ask", "fetch", "memory", "task", "skills", "checkpoint", "hashline", "ast", "plan", "search",
-                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "openclaw_plugins", "diagnostics", "reflect", "approvals", "code_exec", "evolution", "code_nav", "rules", "budget", "github", "notify", "workflows", "process", "output", "inspect_file", "extras", "board", "guard", "review", "image_gen", "lsp", "nodes", "hosts"]
+                    "hooks", "hermes_plugins", "tracing", "archive", "durable", "sandbox", "browser", "scheduler", "claude_compat", "openclaw_plugins", "diagnostics", "reflect", "approvals", "code_exec", "evolution", "code_nav", "rules", "budget", "github", "notify", "workflows", "process", "output", "inspect_file", "extras", "board", "guard", "review", "image_gen", "lsp", "nodes", "resilience", "voice", "hosts"]
 _loaded = False
 
 
@@ -292,6 +294,18 @@ class CapabilityManager:
             if isinstance(r, dict) and r.get("content") is not None:
                 result = r
         return result
+
+    def context(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """What the model is sent, after capabilities had a chance to shrink it. The session file is never changed."""
+        for cid, fn in self._each("context"):
+            try:
+                r = fn(self.session, messages)
+            except Exception as e:
+                self.session.diagnostics.append(f"capability '{cid}' context: {type(e).__name__}: {e}")
+                continue
+            if isinstance(r, list):
+                messages = r
+        return messages
 
     def on_prompt(self, text: str):
         """(extra context to append, block reason). Hooks run in capability order; the first block wins."""
