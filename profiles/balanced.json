@@ -13,7 +13,11 @@
     "approvals",
     "code-exec",
     "code-nav",
-    "rules"
+    "rules",
+    "workflows",
+    "github",
+    "notify",
+    "budget"
   ],
   "omni_registry": {
     "enabled": true,

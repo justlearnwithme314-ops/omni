@@ -25,7 +25,10 @@
     "code-exec",
     "self-evolve",
     "code-nav",
-    "rules"
+    "rules",
+    "workflows",
+    "notify",
+    "budget"
   ],
   "skills_budget_chars": 8000
 }

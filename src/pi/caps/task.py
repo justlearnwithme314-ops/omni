@@ -23,6 +23,7 @@ from . import Capability
 READ_ONLY_TOOLS = ["read", "grep", "find", "ls"]
 WORK_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"]
 MAX_REPORT_CHARS = 12_000
+MAX_PARALLEL_TASKS = 6
 SUBAGENT_PROMPT = ("You are a subagent working on one delegated task. You have no memory of the parent conversation: "
                    "everything you need is in the task below. Do the work, then end with a concise final report "
                    "(findings, files changed with paths, anything left undone). The report is the only thing the "
@@ -161,17 +162,51 @@ def run_subagent(parent: Any, prompt: str, read_only: bool, signal: Any = None, 
 
 
 def _tools(session: Any) -> Dict[str, ToolDef]:
-    def execute(_id, p, signal=None, on_update=None, ctx=None):
-        prompt = str(p.get("prompt") or "").strip()
+    def one(spec: Dict[str, Any], signal: Any, on_update: Any) -> Dict[str, Any]:
+        prompt = str(spec.get("prompt") or "").strip()
         if not prompt:
             raise ToolError("prompt is required: a complete, self-contained description of the task")
         agent = None
-        if p.get("agent"):
+        if spec.get("agent"):
             agents = discover_agents(session)
-            agent = agents.get(str(p["agent"]).strip().lower())
+            agent = agents.get(str(spec["agent"]).strip().lower())
             if agent is None:
-                raise ToolError(f"unknown agent '{p['agent']}'. Available: {', '.join(sorted(agents)) or '(none defined)'}")
-        r = run_subagent(session, prompt, bool(p.get("read_only")), signal, on_update, agent, str(p.get("model") or ""))
+                raise ToolError(f"unknown agent '{spec['agent']}'. Available: {', '.join(sorted(agents)) or '(none defined)'}")
+        return run_subagent(session, prompt, bool(spec.get("read_only")), signal, on_update, agent, str(spec.get("model") or ""))
+
+    def execute(_id, p, signal=None, on_update=None, ctx=None):
+        batch = p.get("tasks")
+        if isinstance(batch, list) and batch:  # independent subtasks side by side (Oh My Pi task batches, Hermes delegation)
+            if len(batch) > MAX_PARALLEL_TASKS:
+                raise ToolError(f"at most {MAX_PARALLEL_TASKS} tasks per call")
+            from concurrent.futures import ThreadPoolExecutor
+            done: List[str] = []
+
+            def run_one(item: Any) -> Dict[str, Any]:
+                i, spec = item
+                try:
+                    r = one(spec if isinstance(spec, dict) else {}, signal, None)
+                except ToolError as e:
+                    r = {"text": f"FAILED: {e}", "usage": {"input": 0, "output": 0, "cost": 0.0}, "toolCalls": 0, "turns": 0, "failed": True}
+                done.append(str(i + 1))
+                if on_update:
+                    on_update({"content": [{"type": "text", "text": f"finished {len(done)}/{len(batch)}: task {', '.join(sorted(done))}"}]})
+                return r
+            with ThreadPoolExecutor(max_workers=min(4, len(batch)), thread_name_prefix="omni-subagent") as pool:
+                results = list(pool.map(run_one, enumerate(batch)))
+            share = max(1500, MAX_REPORT_CHARS // len(batch))
+            parts = []
+            for i, (spec, r) in enumerate(zip(batch, results), 1):
+                label = str((spec or {}).get("description") or "").strip() if isinstance(spec, dict) else ""
+                text = r["text"] or "(no written report)"
+                if len(text) > share:
+                    text = text[:share] + f"\n[truncated: {len(r['text']) - share} more characters]"
+                parts.append(f"## Task {i}" + (f": {label}" if label else "") + f"\n{text}")
+            failed = sum(1 for r in results if r.get("failed"))
+            return text_result("\n\n".join(parts), {"tasks": len(batch), "failed": failed,
+                                                    "toolCalls": sum(r["toolCalls"] for r in results),
+                                                    "cost": round(sum(r["usage"]["cost"] for r in results), 6)}, failed == len(batch))
+        r = one(p, signal, on_update)
         text = r["text"] or "(the subagent finished without a written report)"
         if len(text) > MAX_REPORT_CHARS:
             text = text[:MAX_REPORT_CHARS] + f"\n\n[report truncated: {len(r['text']) - MAX_REPORT_CHARS} more characters]"
@@ -190,12 +225,18 @@ def _tools(session: Any) -> Dict[str, ToolDef]:
         description="Delegate a self-contained task to a subagent with a fresh context and get back only its final "
                     "report. Use it for wide searches, investigations and independent subtasks whose intermediate "
                     "output you do not need. The subagent knows nothing about this conversation: put all context, "
-                    "paths and the expected output in `prompt`. Set read_only=true for pure research." + listing + roles,
+                    "paths and the expected output in `prompt`. Set read_only=true for pure research. For several independent "
+                    "subtasks, pass `tasks` to run them at the same time." + listing + roles,
         parameters={"type": "object", "properties": {
             "description": {"type": "string", "description": "3-6 word label"},
             "prompt": {"type": "string"}, "read_only": {"type": "boolean"},
             "agent": {"type": "string", "description": "name of a defined agent (optional)"},
-            "model": {"type": "string", "description": "model role or id for this subagent (optional)"}}, "required": ["prompt"]},
+            "model": {"type": "string", "description": "model role or id for this subagent (optional)"},
+            "tasks": {"type": "array", "description": "instead of one prompt: up to 6 independent tasks run in parallel, "
+                      "each {prompt, description?, read_only?, agent?, model?}",
+                      "items": {"type": "object", "properties": {"prompt": {"type": "string"}, "description": {"type": "string"},
+                                                                 "read_only": {"type": "boolean"}, "agent": {"type": "string"},
+                                                                 "model": {"type": "string"}}, "required": ["prompt"]}}}},
         execute=execute, prompt_snippet="Delegate a self-contained task to a subagent")}
 
 
