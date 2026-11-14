@@ -220,6 +220,15 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
 - **`file-inspect`** (Oh My Pi): `inspect` shows SQLite databases, zip / tar archives, notebooks and CSV files as text.
 - **`keywords`** (Oh My Pi): `ultrathink`, `chillax`, `orchestrate`, `readonly`, plus your own in a profile's `"keywords"`.
 - **`feeds`** (OpenClaw): follow RSS / Atom feeds and see only new items.
+- **`board`** (Hermes kanban, OpenClaw workboard): a task board shared by every session of a project (`todo`, `doing`,
+  `blocked` with a reason, `review`, `done`), kept in `<agent-dir>/board.sqlite`. Tool `board`, command `/board`.
+- **`wake`** (Letta): the agent schedules its own next turn in the open conversation (`wake(in: "10m", note: ...)`),
+  up to 6 hours and 5 pending. Needs the terminal window to stay open; `cronjob` covers unattended delays.
+- **`mcp-audit`** (Hermes): `/mcp-audit` and the `mcp_audit` tool look up the npm / PyPI packages behind MCP servers
+  in the OSV database and report known malware and vulnerabilities. Report only; nothing is blocked.
+- **`structured-output`** (Browser Use): with a JSON schema in the profile (`"output_schema"`) or in
+  `.omni/output-schema.json`, the agent finishes by calling `respond`; the validated value is in
+  `session.structured_output` and written to `OMNI_OUTPUT_FILE` when set.
 - `/diff [staged|all]` (with `workflows`) shows the working-tree changes. `"browser": {"allowed_domains": ["*.example.com"]}` limits where the browser may go.
 
 ## Startup time and health
