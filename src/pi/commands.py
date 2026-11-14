@@ -59,6 +59,12 @@ OMNI_EXTRAS: List[Tuple[str, str, Optional[str]]] = [
     ("plan", "Plan mode: read-only until you approve the model's plan (needs the `plan` capability)", "[on|off]"),
     ("capabilities", "Turn modules on/off (todo, memory, subagents, hosts…) and see what each costs in context",
      "<id> [on|off]"),
+    ("context", "What fills the context window: system prompt, tools, modules, conversation", None),
+    ("tools", "List the tools the model can use right now", None),
+    ("retry", "Send your last message again", None),
+    ("btw", "Ask a side question about this conversation without adding it to the history", "<question>"),
+    ("handoff", "Summarise this session and continue in a fresh one", "[what to focus on]"),
+    ("loop", "Run a prompt several times in a row (stops on interrupt or when the reply contains DONE)", "<times> <prompt>"),
     ("commands", "Command sources: pick which extension/prompt/skill a duplicate /command runs, rename prefixes",
      "[list|conflicts|prefer <name> <prefix:name>|prefix <source> <new>|reset]"),
 ]
@@ -670,6 +676,105 @@ class Commands:
             return
         self.s.settings.set_global("theme", name)
         self.port.apply_theme(name)
+
+    # ---------------------------------------------------------------------------------------- Oh My Pi extras
+    def cmd_context(self, args: str) -> None:
+        from .agent import estimate_tokens
+        s = self.s
+        u = s.context_usage()
+        tools = s.all_tools()
+        active = [tools[n] for n in s.active_tool_names if n in tools]
+        t_tools = sum(estimate_tokens({"name": t.name, "description": t.description, "parameters": t.parameters}) for t in active)
+        t_caps = estimate_tokens(s.caps.prompt_section()) if hasattr(s, "caps") else 0
+        t_sys = max(0, estimate_tokens(s.system_prompt()) - t_caps)
+        t_msgs = sum(estimate_tokens(m) for m in s.sessions.build_context()["messages"])
+        window = u["contextWindow"] or 0
+        pct = lambda n: f"{n / window * 100:5.1f}%" if window else "     -"  # noqa: E731
+        lines = [f"in use         {u['tokens']:>9,} / {window:,}" + (f"  ({u['percent']:.1f}%)" if u.get("percent") is not None else ""),
+                 f"system prompt  {t_sys:>9,}  {pct(t_sys)}", f"modules        {t_caps:>9,}  {pct(t_caps)}",
+                 f"tools ({len(active):>2})     {t_tools:>9,}  {pct(t_tools)}", f"conversation   {t_msgs:>9,}  {pct(t_msgs)}",
+                 "", "Parts are estimates (about 4 characters per token). /capabilities shows each module's share; /compact frees space."]
+        self.port.show("context", lines)
+
+    def cmd_tools(self, args: str) -> None:
+        s = self.s
+        tools = s.all_tools()
+        lines = [f"{n:<20} {(tools[n].description or '').split('. ')[0][:90]}" for n in s.active_tool_names if n in tools]
+        off = sorted(n for n in tools if n not in s.active_tool_names)
+        if off:
+            lines += ["", "available but off: " + ", ".join(off)]
+        self.port.show("tools", lines)
+
+    def _last_user_text(self) -> str:
+        from .agent import text_of
+        for e in reversed(self.s.sessions.get_branch()):
+            if e.get("type") == "message" and e["message"].get("role") == "user":
+                return text_of(e["message"].get("content"))
+        return ""
+
+    def cmd_retry(self, args: str) -> None:
+        text = self._last_user_text()
+        if not text:
+            self.port.notify("Nothing to retry yet.", "info")
+            return
+        self.s.prompt(text)
+
+    def _side_call(self, system: str, user: str, max_tokens: int) -> Optional[str]:
+        from .ai.stream import complete
+        s = self.s
+        if s.model is None:
+            self.port.notify("No model selected.", "warning")
+            return None
+        msg = complete(s.model, {"systemPrompt": system, "tools": [], "messages": [{"role": "user", "content": user, "timestamp": 0}]},
+                       {"apiKey": s.auth.get_api_key(s.model["provider"]), "maxTokens": max_tokens})
+        if msg.get("stopReason") == "error":
+            self.port.notify(f"Model error: {msg.get('errorMessage') or 'unknown'}", "error")
+            return None
+        return "".join(b.get("text", "") for b in msg.get("content") or [] if b.get("type") == "text").strip()
+
+    def cmd_btw(self, args: str) -> None:
+        if not args.strip():
+            self.port.notify("Usage: /btw <question>", "info")
+            return
+        from .caps.reflect import transcript
+        answer = self._side_call("Answer the user's side question briefly, using the conversation below as context. Do not continue "
+                                 "the task.", f"CONVERSATION SO FAR:\n{transcript(self.s) or '(empty)'}\n\nSIDE QUESTION: {args.strip()}", 800)
+        if answer:
+            self.port.show("btw", answer.splitlines())
+
+    def cmd_handoff(self, args: str) -> None:
+        from .caps.reflect import transcript
+        convo = transcript(self.s, 24_000)
+        if len(convo) < 200:
+            self.port.notify("Not enough conversation to hand off yet.", "info")
+            return
+        focus = f" Focus on: {args.strip()}." if args.strip() else ""
+        doc = self._side_call("Write a handoff note for another engineer who will continue this work with no access to the "
+                              "conversation. Sections: Goal; Done so far (with file paths); Current state; Next steps; Things to "
+                              "watch out for. Be specific and brief." + focus, convo, 1500)
+        if not doc:
+            return
+        if self.s.new_session():
+            self.port.reset_transcript()
+            self.s.prompt("Continue this work from the handoff note below.\n\n" + doc)
+
+    def cmd_loop(self, args: str) -> None:
+        count, _, text = args.strip().partition(" ")
+        if not count.isdigit() or not text.strip():
+            self.port.notify("Usage: /loop <times> <prompt>", "info")
+            return
+        n = max(1, min(int(count), 20))
+        for i in range(n):
+            before = len(self.s.sessions.entries)
+            self.s.prompt(text.strip())
+            new = [e["message"] for e in self.s.sessions.entries[before:] if e.get("type") == "message" and e["message"].get("role") == "assistant"]
+            if not new or new[-1].get("stopReason") in ("aborted", "error"):
+                self.port.notify(f"Loop stopped after {i + 1} of {n}.", "warning")
+                return
+            if "DONE" in last_assistant_text(self.s):
+                self.port.notify(f"Loop finished early: the reply said DONE ({i + 1} of {n}).", "success")
+                return
+        self.port.notify(f"Loop finished: {n} run(s).", "success")
 
     def cmd_hotkeys(self, args: str) -> None:
         lines = [f"{k:<34} {v}" for k, v in HOTKEYS]
