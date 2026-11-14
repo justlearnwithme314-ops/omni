@@ -13,6 +13,7 @@
     "+image-gen",
     "+lsp",
     "+watch-pr",
-    "+structured-output"
+    "+structured-output",
+    "+nodes"
   ]
 }

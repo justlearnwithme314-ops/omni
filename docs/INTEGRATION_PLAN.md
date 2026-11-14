@@ -369,3 +369,11 @@ Discord gateway channels, channel plugins.
 
 Still open: OpenClaw provider plugins and remote nodes; loading Hermes platform adapters and OpenClaw channel plugins
 as they are (only the Omni channel slot exists); remaining Oh My Pi slash commands; pull diagnostics in `lsp`.
+
+## Update 2026-11-15 (round H)
+
+Merged: remote nodes (`omni node serve`, `node` tool), OpenClaw provider plugins from manifests, `/context`, `/tools`,
+`/retry`, `/btw`, `/handoff`, `/loop`.
+
+Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; TLS and
+pairing codes for nodes; pull diagnostics in `lsp`.

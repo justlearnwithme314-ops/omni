@@ -45,6 +45,65 @@ def _entries(d: Path) -> List[Path]:
     return out
 
 
+SUPPORTED_APIS = ("openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai")
+
+
+def manifest_providers(manifest: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Model providers a plugin declares in its manifest (`modelCatalog.providers` + `setup.providers[].envVars`),
+    as provider configs for the model registry. Providers whose wire format this core does not speak are skipped."""
+    out: Dict[str, Dict[str, Any]] = {}
+    catalog = ((manifest.get("modelCatalog") or {}).get("providers") or {}) if isinstance(manifest.get("modelCatalog"), dict) else {}
+    env: Dict[str, List[str]] = {}
+    for sp in ((manifest.get("setup") or {}).get("providers") or []) if isinstance(manifest.get("setup"), dict) else []:
+        if isinstance(sp, dict) and sp.get("id"):
+            env[str(sp["id"])] = [str(v) for v in sp.get("envVars") or []]
+    for pid, cfg in catalog.items():
+        if not isinstance(cfg, dict) or cfg.get("api") not in SUPPORTED_APIS or not cfg.get("baseUrl"):
+            continue
+        models = [m for m in cfg.get("models") or [] if isinstance(m, dict) and m.get("id")]
+        if not models:
+            continue
+        entry: Dict[str, Any] = {"baseUrl": str(cfg["baseUrl"]), "api": cfg["api"], "models": models, "_env": env.get(pid, [])}
+        if cfg.get("headers"):
+            entry["headers"] = cfg["headers"]
+        out[str(pid)] = entry
+    return out
+
+
+def _register_providers(session: Any) -> str:
+    """Runs when the capability loads: add the declared providers that are not already known."""
+    from ..ai.models import PROVIDERS
+    reg = session.registry
+    added: List[str] = []
+    for plugin in discover(session):
+        for pid, cfg in plugin["providers"].items():
+            if pid in PROVIDERS or pid in reg.extension_providers or any(m["provider"] == pid for m in reg.models):
+                continue
+            entry = {k: v for k, v in cfg.items() if k != "_env"}
+            key_var = next((v for v in cfg["_env"] if os.environ.get(v)), cfg["_env"][0] if cfg["_env"] else None)
+            if key_var:
+                entry["apiKey"] = "$" + key_var
+            reg.extension_providers[pid] = entry
+            added.append(pid)
+    previous = getattr(session, "_openclaw_providers", None) or []
+    for pid in previous:
+        if pid not in added:
+            reg.extension_providers.pop(pid, None)
+    if added or previous:
+        reg.reload()
+    session._openclaw_providers = added
+    return ""
+
+
+def _unload(session: Any) -> None:
+    gone = getattr(session, "_openclaw_providers", None) or []
+    for pid in gone:
+        session.registry.extension_providers.pop(pid, None)
+    if gone:
+        session.registry.reload()
+    session._openclaw_providers = []
+
+
 def discover(session: Any) -> List[Dict[str, Any]]:
     from ..profiles import PROJECT_ROOT
     roots = [Path.home() / ".openclaw" / "extensions", PROJECT_ROOT / "plugins" / "openclaw"]
@@ -70,7 +129,10 @@ def discover(session: Any) -> List[Dict[str, Any]]:
             if pid in seen:
                 continue
             seen.add(pid)
-            plugins.append({"id": pid, "name": str(manifest.get("name") or pid), "path": d, "entries": _entries(d),
+            provider_only = bool(manifest_providers(manifest)) and not manifest.get("channels") and not (manifest.get("contracts") or {}).get("tools")
+            # a plugin that only declares model providers is used from its manifest; its entry needs OpenClaw's own runtime
+            plugins.append({"id": pid, "name": str(manifest.get("name") or pid), "path": d, "entries": [] if provider_only else _entries(d),
+                            "providers": manifest_providers(manifest),
                             "description": str(manifest.get("description") or ""),
                             "channels": list(manifest.get("channels") or []),
                             "tools": list((manifest.get("contracts") or {}).get("tools") or [])})
@@ -105,12 +167,15 @@ def describe(session: Any) -> str:
                 gaps = sorted(m for m in e.get("missing") or [] if m.startswith("openclaw"))
                 states.append(f"loaded, tools: {', '.join(e.get('tools') or []) or 'none'}" +
                               (f"; not supported yet: {', '.join(g.split('.', 1)[1] for g in gaps)[:160]}" if gaps else ""))
-        rows.append(f"{p['id']} — {'; '.join(states) or 'no entry file'}\n   {p['path']}")
+        provs = ", ".join(f"{pid} ({len(c['models'])} models)" for pid, c in p["providers"].items())
+        rows.append(f"{p['id']} — {'; '.join(states) or ('declares providers only' if provs else 'no entry file')}"
+                    + (f"\n   model providers: {provs}" if provs else "") + f"\n   {p['path']}")
     return "\n".join(rows)
 
 
 CAPABILITIES = [Capability(
     "openclaw-plugins", "OpenClaw plugin host", "Load OpenClaw plugins (openclaw.plugin.json + definePluginEntry): their "
     "tools, commands and core hooks.", "OpenClaw", extension_paths=_extension_paths, available=_available,
+    prompt=_register_providers, unload=_unload,
     commands=lambda s: {"openclaw": ("List OpenClaw plugins and what loaded", lambda _a: describe(s))}, group="host",
     requires=["extensions"])]

@@ -239,8 +239,16 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
 - **`image-gen`** (Hermes): `image_generate` saves an image into the project. Built-in providers: OpenAI
   (`OPENAI_API_KEY`) and Gemini (`GEMINI_API_KEY`); a Hermes plugin's `register_image_gen_provider` adds more.
   `/image-providers` lists them.
+- **`nodes`** (OpenClaw): the `node` tool runs commands and reads / writes files on another machine that runs
+  `omni node serve` (token-protected, plain HTTP: keep it on loopback or behind a tunnel / VPN). Register machines
+  with `omni node add NAME URL TOKEN` or in the profile's `"nodes"`. `/nodes` shows which ones answer.
 
 Outside the capability system:
+- **OpenClaw provider plugins**: with `openclaw-plugins` on, model providers a plugin declares in its manifest
+  (`modelCatalog.providers`, OpenAI-compatible, Responses, Anthropic or Google wire formats) appear in `/model`; the
+  key comes from the environment variable the manifest names. The plugin's own code is not run for this.
+- **More commands** (Oh My Pi): `/context` (what fills the window), `/tools`, `/retry`, `/btw <question>` (side
+  question, not added to history), `/handoff` (summarise and continue in a fresh session), `/loop <n> <prompt>`.
 - **`keybindings.json`** (Pi): `<agent-dir>/keybindings.json` reassigns keys using Pi's action names
   (`"app.model.select": "ctrl+k"`), plus `"/command": "key"`. `/hotkeys` shows the result.
 - **Gateway channels**: `slack` and `discord` (polling the HTTP APIs, no extra library) next to telegram, http and
