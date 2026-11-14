@@ -19,6 +19,8 @@
     "notify",
     "budget",
     "processes",
+    "board",
+    "wake",
     "quiet-output",
     "secrets",
     "file-inspect",

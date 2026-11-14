@@ -351,3 +351,13 @@ Targets: Pi conformance ≥ 95%; OMP ≥ 85%; Hermes plugin load ≥ 90% of bund
 - **Verify before implementing:** exact OMP `ExtensionAPI` delta, Hermes `VALID_HOOKS` list and `PluginContext`
   methods, OpenClaw `plugin-sdk` entry contracts — read the files named in §4 and record them in the parity report
   rather than relying on this document.
+
+## Update 2026-11-14 (rounds D-F)
+
+Merged: rules, budget, github, notify, workflows, background processes, quiet-output, secrets, file-inspect, keywords,
+feeds (rounds D and E); task board, wake, mcp-audit, structured-output (round F).
+
+Still open: OpenClaw advisor (periodic review) and channel / provider plugins and remote nodes; Hermes platform and
+image-generation plugin kinds; Oh My Pi language-server tool and remaining slash commands; Pi keybindings file;
+Letta watch-PR. `structured-output` is not yet printed by print mode, and `mcp-audit` does not run automatically
+when a server is added.
