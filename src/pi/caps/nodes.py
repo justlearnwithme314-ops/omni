@@ -69,11 +69,12 @@ def request(name: str, entry: Dict[str, Any], endpoint: str, payload: Dict[str, 
     url = str(entry.get("url") or "").rstrip("/")
     if not url.startswith(("http://", "https://")):
         raise ToolError(f"node '{name}' has no valid url (it must start with http:// or https://)")
-    req = urllib.request.Request(url + endpoint, data=json.dumps(payload).encode("utf-8"), method="POST",
-                                 headers={"Content-Type": "application/json", "Authorization": f"Bearer {_token(name, entry)}"})
+    from ..node_server import PinError, post_json
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        data = post_json(url + endpoint, payload, _token(name, entry), timeout=timeout,
+                         fingerprint=entry.get("fingerprint") or None, ca=entry.get("ca") or None)
+    except PinError as e:
+        raise ToolError(f"node '{name}': {e}") from None
     except urllib.error.HTTPError as e:
         if e.code == 401:
             raise ToolError(f"node '{name}' rejected the token (401). Check the token given to `omni node add` against "
@@ -94,7 +95,8 @@ def request(name: str, entry: Dict[str, Any], endpoint: str, payload: Dict[str, 
 
 
 def _info_line(info: Dict[str, Any]) -> str:
-    return f"{info.get('hostname')} ({info.get('platform')}), root {info.get('root')}" + (", read-only" if info.get("read_only") else "")
+    return (f"{info.get('hostname')} ({info.get('platform')}), root {info.get('root')}" + (", read-only" if info.get("read_only") else "")
+            + (f", {info.get('paired_clients')} paired client(s)" if info.get("paired_clients") else ""))
 
 
 def status_text(session: Any) -> str:
@@ -107,7 +109,10 @@ def status_text(session: Any) -> str:
             state = "ok: " + _info_line(request(name, nodes[name], "/v1/info", {}, timeout=PROBE_TIMEOUT))
         except ToolError as e:
             state = "NOT ANSWERING: " + str(e)
-        rows.append(f"{name:<16} {nodes[name].get('url', '')}\n    {state}")
+        url = str(nodes[name].get("url", ""))
+        trust = ("https, certificate pinned" if nodes[name].get("fingerprint") else "https, private CA" if nodes[name].get("ca")
+                 else "https" if url.startswith("https://") else "http, unencrypted")
+        rows.append(f"{name:<16} {url}  ({trust})\n    {state}")
     return "\n".join(rows)
 
 

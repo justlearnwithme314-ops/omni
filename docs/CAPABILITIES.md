@@ -235,13 +235,17 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
   comments or its state change. Polls once a minute while the window is open.
 - **`lsp`** (Oh My Pi): the `lsp` tool talks to real language servers (pyright / pylsp, typescript-language-server,
   gopls, rust-analyzer, clangd, or your own in the profile's `"lsp"`): definition, references, hover, symbols,
-  workspace symbols, diagnostics, rename preview. `/lsp` shows what is running and installed.
+  workspace symbols, diagnostics (pushed or pulled), code actions (`code_actions`, `apply_action`), `format`, and
+  rename (preview, or `apply: true`). Columns are correct on lines with emoji. Edits go through plan mode and
+  approvals and never leave the project. `/lsp` shows what is running, and the last output of a server that died.
 - **`image-gen`** (Hermes): `image_generate` saves an image into the project. Built-in providers: OpenAI
   (`OPENAI_API_KEY`) and Gemini (`GEMINI_API_KEY`); a Hermes plugin's `register_image_gen_provider` adds more.
   `/image-providers` lists them.
 - **`nodes`** (OpenClaw): the `node` tool runs commands and reads / writes files on another machine that runs
-  `omni node serve` (token-protected, plain HTTP: keep it on loopback or behind a tunnel / VPN). Register machines
-  with `omni node add NAME URL TOKEN` or in the profile's `"nodes"`. `/nodes` shows which ones answer.
+  `omni node serve`. Serve HTTPS with `--cert/--key` (or `--self-signed`, which prints the openssl command) and pin
+  the printed fingerprint with `omni node add NAME URL TOKEN --fingerprint sha256:..` (or `--ca FILE`). Instead of
+  copying the token, start the node with `--pair` and run `omni node pair NAME URL CODE` (one-time code, 10 minutes,
+  5 attempts); `--revoke CLIENT` withdraws a paired client. `/nodes` shows which ones answer and how.
 - **`context-trim`** (OpenClaw): old, long tool results are shortened in what is sent to the model (the session
   file keeps everything). `"context_trim": {"keep_turns": 8, "max_chars": 1500, "step": 4}`; the boundary moves in
   steps so the provider's prompt cache keeps working.
@@ -257,6 +261,12 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
 - **`auto-title`** (Hermes, OpenClaw): names an unnamed session after its first exchange with one tiny model call.
 
 Outside the capability system:
+- **Web interface** (Hermes dashboard, OpenClaw control UI): `omni web` opens the agent in a browser tab on this
+  machine: streamed answers, folded tool calls, slash commands, pickers and confirmations as dialogs. The address
+  carries a random access key; one page, no external resources.
+- **Batch runs** (Hermes batch runner): `omni batch prompts.jsonl [--parallel N] [--resume]` answers many prompts
+  without a window, one fresh session each, and writes one result line per prompt.
+- **`omni update`**: fast-forwards the git checkout Omni runs from; refuses with local changes.
 - **MCP server mode** (Hermes, OpenClaw): `omni mcp serve` makes Omni a Model Context Protocol server over stdio, so
   another agent or editor can call it as a tool (`omni_agent`, `omni_status`; `--expose agent,tools` also offers
   Omni's own tools). `omni mcp serve --print-config` prints the snippet for the client's configuration.
@@ -266,8 +276,10 @@ Outside the capability system:
   request fails for good (after retries), the next model in the list that you are signed in to takes over for that
   request; your chosen model stays selected.
 - **Agent file** (Letta): `omni agent export [FILE]` packs memory, the archive, custom profiles, skills, the
-  capability overlay, scheduled jobs, key bindings and the task board into one `.omni-agent` file;
-  `omni agent import FILE [--replace] [--dry-run]` and `omni agent inspect FILE` read it. Credentials and session
+  capability overlay, scheduled jobs, key bindings, the task board, instruction files (AGENTS.md ...), prompt
+  templates, personas, themes and a safe subset of settings into one `.omni-agent` file;
+  `omni agent import FILE [--replace] [--dry-run] [--profile NAME] [--map-path OLD=NEW]` and
+  `omni agent inspect FILE` read it. Credential files, files holding credential-shaped values, and session
   transcripts are never included.
 - **OpenClaw provider plugins**: with `openclaw-plugins` on, model providers a plugin declares in its manifest
   (`modelCatalog.providers`, OpenAI-compatible, Responses, Anthropic or Google wire formats) appear in `/model`; the

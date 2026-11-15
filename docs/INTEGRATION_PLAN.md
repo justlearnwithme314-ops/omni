@@ -392,3 +392,12 @@ Merged: persona, commit, auto-title, MCP server mode (`omni mcp serve`), ACP edi
 
 Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; TLS and
 pairing codes for nodes; pull diagnostics in `lsp`; push to talk; more agent-file sections.
+
+## Update 2026-11-15 (round K)
+
+Merged: web interface (`omni web`), `omni batch`, `omni update`; remote nodes gained TLS, certificate pinning and
+pairing codes; the `lsp` tool gained pull diagnostics, UTF-16 columns, code actions, formatting and applying
+renames; the agent file gained instructions, prompts, personas, themes and settings sections.
+
+Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; push to
+talk; image attachments and session switching in the web interface.
