@@ -30,6 +30,8 @@
     "notify",
     "budget",
     "processes",
+    "persona",
+    "auto-title",
     "context-trim",
     "voice",
     "image-gen",

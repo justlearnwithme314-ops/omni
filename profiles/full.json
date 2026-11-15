@@ -17,6 +17,9 @@
     "+nodes",
     "+consensus",
     "+voice",
-    "+context-trim"
+    "+context-trim",
+    "+persona",
+    "+commit",
+    "+auto-title"
   ]
 }
