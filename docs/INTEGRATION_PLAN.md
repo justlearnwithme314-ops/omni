@@ -385,3 +385,10 @@ Merged: context-trim, consensus, voice (speak / transcribe), model failover (`fa
 
 Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; TLS and
 pairing codes for nodes; pull diagnostics in `lsp`; voice input in the terminal window (push to talk).
+
+## Update 2026-11-15 (round J)
+
+Merged: persona, commit, auto-title, MCP server mode (`omni mcp serve`), ACP editor server (`omni acp`).
+
+Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; TLS and
+pairing codes for nodes; pull diagnostics in `lsp`; push to talk; more agent-file sections.

@@ -249,8 +249,19 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
   answers side by side. `"consensus": {"models": ["provider/id", ...]}`. One request per model.
 - **`voice`** (Hermes, OpenClaw): `speak` (text to speech: OpenAI, or the operating system's own voice offline) and
   `transcribe` (speech to text, OpenAI). `/voices` lists providers.
+- **`persona`** (Hermes, OpenClaw): `/persona [name|off]` switches the agent's voice and working style: `concise`,
+  `teacher`, `reviewer`, `pair`, or your own in `<agent-dir>/personas/<name>.md`. `"persona": "name"` in a profile
+  sets a default. Costs nothing while off.
+- **`commit`** (Oh My Pi): `/commit [hint]` writes a commit message from the staged changes (or all tracked
+  changes) in the repository's own style and commits when you confirm.
+- **`auto-title`** (Hermes, OpenClaw): names an unnamed session after its first exchange with one tiny model call.
 
 Outside the capability system:
+- **MCP server mode** (Hermes, OpenClaw): `omni mcp serve` makes Omni a Model Context Protocol server over stdio, so
+  another agent or editor can call it as a tool (`omni_agent`, `omni_status`; `--expose agent,tools` also offers
+  Omni's own tools). `omni mcp serve --print-config` prints the snippet for the client's configuration.
+- **Editor integration** (Hermes ACP adapter): `omni acp` speaks the Agent Client Protocol over stdio for editors
+  such as Zed; `omni acp --print-config` prints the editor settings snippet.
 - **Model failover** (OpenClaw, Hermes): `"fallbackModels": ["provider/id", ...]` in a profile or in settings. When a
   request fails for good (after retries), the next model in the list that you are signed in to takes over for that
   request; your chosen model stays selected.

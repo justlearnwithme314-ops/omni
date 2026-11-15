@@ -181,6 +181,28 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
         from . import resources as res
         from .agentfile import cli as agent_cli
         hard_exit(agent_cli(raw[1:], res.agent_dir()))
+    if raw[:2] == ["mcp", "serve"] or raw[:1] == ["acp"]:   # Omni as a server for other agents (MCP) and editors (ACP)
+        from pathlib import Path
+        from . import resources as res
+        from .agent import AgentSession, SessionOptions
+        from .profiles import active_profile_name, canonical
+
+        def make_opts(profile=None, model=None, cwd=None, session_path=None):
+            plug = Path(__file__).resolve().parents[2] / "plugins" / "pi"
+            return SessionOptions(cwd=cwd or os.getcwd(), model=model, mode="rpc", session=session_path,
+                                  profile=canonical(profile) if profile else active_profile_name(),
+                                  agent_dir=str(res.agent_dir()), omni_plugin_dir=str(plug) if plug.is_dir() else None)
+
+        if raw[0] == "mcp":
+            from .mcp_server import cli as mcp_serve_cli
+            hard_exit(mcp_serve_cli(raw[1:], lambda profile, model, cwd: make_opts(profile, model, cwd)))
+
+        def make_session(cwd, session_path=None, profile=None, model=None, ui=None):
+            session = AgentSession(make_opts(profile, model, cwd, session_path), ui=ui)
+            session.start()
+            return session
+        from .acp_server import cli as acp_cli
+        hard_exit(acp_cli(raw[1:], make_session))
     if raw[:1] == ["cron"] or raw[:1] == ["signal"]:
         from . import resources as res
         from .caps.scheduler import cli as cron_cli

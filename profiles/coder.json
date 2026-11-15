@@ -23,6 +23,8 @@
     "notify",
     "budget",
     "processes",
+    "persona",
+    "commit",
     "context-trim",
     "lsp",
     "watch-pr",
