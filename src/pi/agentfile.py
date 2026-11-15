@@ -5,7 +5,7 @@ the profiles you built, the jobs it runs. `omni agent export` packs all of that 
 (a zip you can open with any archive tool); `omni agent import` unpacks it into the agent folder of another install.
 
     omni agent export [FILE] [--profile NAME] [--only a,b] [--without a,b]
-    omni agent import FILE [--replace] [--only a,b] [--dry-run]
+    omni agent import FILE [--replace] [--only a,b] [--dry-run] [--profile NAME] [--map-path OLD=NEW]...
     omni agent inspect FILE
 
 Sections (name them with `--only` / `--without`):
@@ -18,18 +18,40 @@ Sections (name them with `--only` / `--without`):
     cron          scheduled jobs (`<agent-dir>/cron/jobs.json`), without their past output
     keybindings   `<agent-dir>/keybindings.json`
     board         task board cards and their comments, for every project
+    instructions  the agent folder's own instruction files: `AGENTS.md` (or `AGENTS.override.md` / `CLAUDE.md`),
+                  `SYSTEM.md` and `APPEND_SYSTEM.md`, whichever exist
+    prompts       prompt templates: `<agent-dir>/prompts/**/*.md` (a template over 1 MB is left out)
+    personas      your personas: `<agent-dir>/personas/*.md`
+    themes        your themes: `<agent-dir>/themes/*.json`
+    settings      the preferences in `<agent-dir>/settings.json` that are safe to carry: theme, default thinking
+                  level, default provider / model, enabled and fallback models, model roles, retry, compaction,
+                  steering and follow-up mode, and a few display switches. Everything else in that file stays
+                  behind and is listed by name in the manifest.
 
 Import adds by default (`merge`): what is already there stays, what is missing arrives. Memory entries and archive
-passages that already exist are not added twice; a profile or skill with the same name is kept and reported.
-`--replace` makes each section in the file look like the file instead; sections that are not in the file are never
-touched. `--dry-run` prints what would change and writes nothing.
+passages that already exist are not added twice; a profile, skill, instruction file, prompt, persona or theme with
+the same name is kept and reported; a setting that is already set here keeps its value. `--replace` makes each
+section in the file look like the file instead; sections that are not in the file are never touched, and settings
+that are not in the file are never removed. `--dry-run` prints what would change and writes nothing.
+
+`--profile NAME` on import writes memory where that profile keeps it (a profile can move the memory folder with
+`memory.dir`); without it memory goes to `<agent-dir>/memories`.
 
 Never in the file: credentials and pairing data (`auth.json`, `secrets.txt`, `nodes.json`, `gateway.json`,
-`mcp.json`, anything named like `*token*`, `*.key` or `.env`), session transcripts, and the output of past cron
-runs. The manifest inside the file lists what was left out and why. Log in again on the new machine.
+`mcp.json`, `.env`, `.env.*`, `*.key`, `*.pem`, `.omni-node/clients.json`), session transcripts, and the output of
+past cron runs. Any other text file is checked for values that look like credentials (GitHub, OpenAI, Anthropic,
+AWS, Slack and Google tokens, bearer tokens, private key blocks); a file that holds one is left out whole. A name
+alone does not decide: a skill called `tokenizer` travels. From settings.json, anything that looks like a
+credential, a path to one, a URL with a password in it or a shell command (`!...`) is dropped. The manifest inside
+the file lists what was left out and why, never the value. Log in again on the new machine.
 
-Two things are tied to the machine and travel as they are: the project folder of each board card, and the working
-folder of each scheduled job. A job whose folder does not exist where it is imported arrives paused.
+Two things are tied to the machine: the project folder of each board card, and the working folder of each scheduled
+job. They travel as they are unless you say where those folders live now: `--map-path /home/me/work=D:\\work`
+(repeatable) rewrites every such folder that starts with the old path. A job whose folder does not exist where it
+is imported arrives paused.
+
+Files written by a newer Omni may hold sections this version does not know: the known ones are imported and the
+others are reported as skipped. Files from before a section existed import as before.
 """
 from __future__ import annotations
 
@@ -48,23 +70,35 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 FORMAT_VERSION = 1
 MARKER = "omni-agent-file"
 EXTENSION = ".omni-agent"
-SECTIONS = ("memory", "archive", "profiles", "skills", "capabilities", "cron", "keybindings", "board")
+SECTIONS = ("memory", "archive", "profiles", "skills", "capabilities", "cron", "keybindings", "board",
+            "instructions", "prompts", "personas", "themes", "settings")
 
 MAX_TOTAL_BYTES = 200 * 1024 * 1024   # uncompressed size of a file that import accepts
 MAX_MEMBERS = 20000
 MAX_SKILL_BYTES = 2 * 1024 * 1024
 MAX_SMALL_FILE = 4 * 1024 * 1024      # one memory block, profile or JSON document
+MAX_TEXT_FILE = 1024 * 1024           # one instruction file, prompt template, persona or theme
 
 SECRET_NAMES = {"auth.json", "secrets.txt", "nodes.json", "gateway.json", "mcp.json", ".env"}
-SECRET_PATTERNS = ("*token*", "*.key", ".env.*", "*.pem", "*secret*", "*credential*")
+SECRET_PATTERNS = ("*.key", ".env.*", "*.pem")
 EXCLUDED = [
-    "credentials and pairing data: auth.json, secrets.txt, nodes.json, gateway.json, mcp.json",
-    "any file or folder named like *token*, *.key, .env, .env.*, *.pem, *secret*, *credential*",
+    "credentials and pairing data: auth.json, secrets.txt, nodes.json, gateway.json, mcp.json, .omni-node/clients.json",
+    "any file or folder named .env, .env.*, *.key or *.pem",
+    "any text file that holds a value shaped like a credential (the file is named under 'skipped', the value is not)",
     "session transcripts (sessions/)",
     "cron run output and queued signals (cron/output, cron/signals)",
-    "settings.json, trust.json, models.json and other machine settings",
+    "settings.json keys outside the portable preferences (named under sections.settings.dropped), trust.json, models.json",
     "shipped profiles and skills that live outside <agent-dir>/skills",
 ]
+# The settings.json keys that are preferences and nothing else. Paths, commands, proxies, package and extension
+# lists, trust and anything unknown stay behind.
+SETTINGS_KEYS = ("theme", "defaultThinkingLevel", "defaultProvider", "defaultModel", "enabledModels", "fallbackModels",
+                 "modelRoles", "retry", "compaction", "quietStartup", "doubleEscapeAction", "steeringMode", "followUpMode",
+                 "hideThinkingBlock", "enableSkillCommands", "autocompleteMaxVisible", "tuiMode", "images",
+                 "parallelReadOnlyTools", "branchSummary")
+INSTRUCTION_EXTRA = ("SYSTEM.md", "APPEND_SYSTEM.md")
+_CRED_KEY = re.compile(r"api[-_]?key|secret|passw|credential|auth|bearer|private[-_]?key|token(?!s)", re.I)
+_URL_CRED = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@", re.I)
 _SKIP_DIRS = {"node_modules", ".git", "__pycache__"}
 _RESERVED = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 _MEMORY_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}\.md$")
@@ -78,9 +112,150 @@ class AgentFileError(ValueError):
 
 # ------------------------------------------------------------------------------------------- helpers
 def is_secret(name: str) -> bool:
-    """True for file or folder names that must never travel in an agent file."""
+    """True for file or folder names that must never travel in an agent file (known credential files only)."""
     n = name.lower()
-    return n in SECRET_NAMES or any(fnmatch.fnmatchcase(n, p) for p in SECRET_PATTERNS)
+    if n in SECRET_NAMES or any(fnmatch.fnmatchcase(n, p) for p in SECRET_PATTERNS):
+        return True
+    # a whole word such as `api_token.txt`, `TOKENS.md` or `db-password`, but not `tokenizer` or `secretary`
+    return bool(_SECRET_WORD.search(n.rsplit(".", 1)[0] if "." in n[1:] else n))
+
+
+_SECRET_WORD = re.compile(r"(?:^|[-_. ])(?:api[-_]?)?(?:tokens?|secrets?|credentials?|passwords?|passwd)(?:$|[-_. ])")
+
+
+def _secret_path(rel: str) -> bool:
+    """`is_secret` for a forward-slash relative path: any part with a credential name, or `.omni-node/**/clients.json`."""
+    parts = [p.lower() for p in rel.split("/") if p]
+    if any(is_secret(p) for p in parts):
+        return True
+    return bool(parts) and parts[-1] == "clients.json" and ".omni-node" in parts[:-1]
+
+
+def credential_shape(data: Any) -> Optional[str]:
+    """The name of the well-known credential shape found in a text (bytes or str), or None. Binary data is not text."""
+    from .caps.output import _SHAPES
+    if isinstance(data, bytes):
+        try:
+            data = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    if not isinstance(data, str) or "\x00" in data:
+        return None
+    return next((name for name, rx in _SHAPES if rx.search(data)), None)
+
+
+def _cred_reason(shape: str) -> str:
+    return f"a credential-like value was found in it ({shape} shape); the file was left out, the value is not recorded"
+
+
+def instruction_names() -> List[str]:
+    """The instruction file names the runtime reads from the agent folder."""
+    from .resources import CONTEXT_CANDIDATES
+    return list(CONTEXT_CANDIDATES) + list(INSTRUCTION_EXTRA)
+
+
+def _unsafe_value(v: Any) -> Optional[str]:
+    if not isinstance(v, str):
+        return None
+    s = v.strip()
+    if s.startswith("!"):
+        return "a shell command"
+    if _URL_CRED.search(s):
+        return "a URL with credentials in it"
+    if s and is_secret(re.split(r"[\\/]", s)[-1]):
+        return "a path to a credential file"
+    if credential_shape(s):
+        return "a credential-like value"
+    return None
+
+
+def _clean_setting(path: str, value: Any, dropped: List[Tuple[str, str]]) -> Tuple[bool, Any]:
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            p = f"{path}.{k}"
+            if _CRED_KEY.search(str(k)):
+                dropped.append((p, "its name looks like a credential"))
+                continue
+            ok, c = _clean_setting(p, v, dropped)
+            if ok:
+                out[str(k)] = c
+        return True, out
+    if isinstance(value, list):
+        items = []
+        for i, v in enumerate(value):
+            ok, c = _clean_setting(f"{path}[{i}]", v, dropped)
+            if ok:
+                items.append(c)
+        return True, items
+    why = _unsafe_value(value)
+    if why:
+        dropped.append((path, f"its value is {why}"))
+        return False, None
+    return True, value
+
+
+def portable_settings(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Tuple[str, str]]]:
+    """-> (the settings that may travel, [(key name, why it was dropped)]). Values never appear in the reasons."""
+    kept: Dict[str, Any] = {}
+    dropped: List[Tuple[str, str]] = []
+    for k, v in data.items():
+        k = str(k)
+        if _CRED_KEY.search(k):
+            dropped.append((k, "its name looks like a credential"))
+        elif k not in SETTINGS_KEYS:
+            dropped.append((k, "not a portable preference"))
+        else:
+            ok, c = _clean_setting(k, v, dropped)
+            if ok:
+                kept[k] = c
+    return kept, dropped
+
+
+def _path_pairs(path_map: Any) -> List[Tuple[str, str]]:
+    """`path_map` as [(old, new)], longest old first. Accepts a dict, pairs, or "OLD=NEW" strings."""
+    if not path_map:
+        return []
+    items: List[Any] = list(path_map.items()) if isinstance(path_map, dict) else [path_map] if isinstance(path_map, str) else list(path_map)
+    pairs: List[Tuple[str, str]] = []
+    for it in items:
+        if isinstance(it, str):
+            old, eq, new = it.partition("=")
+            if not eq:
+                raise AgentFileError(f"path mapping '{it}' is not OLD=NEW")
+        else:
+            try:
+                old, new = it
+            except (TypeError, ValueError):
+                raise AgentFileError("a path mapping is a pair (OLD, NEW) or 'OLD=NEW'") from None
+        old, new = str(old).strip(), str(new).strip()
+        if not old or not new:
+            raise AgentFileError("path mapping needs both OLD and NEW (OLD=NEW)")
+        pairs.append((old, new))
+    return sorted(pairs, key=lambda p: -len(p[0]))
+
+
+def _map_path(value: Any, pairs: List[Tuple[str, str]]) -> Any:
+    """`value` with its leading OLD folder replaced by NEW (whole path components only); anything else unchanged."""
+    if not isinstance(value, str) or not value:
+        return value
+    for old, new in pairs:
+        o = old.rstrip("/\\") or old
+        windows = bool(re.match(r"^[A-Za-z]:", o)) or "\\" in o
+        head = value[:len(o)]
+        if not (head.lower() == o.lower() if windows else head == o):
+            continue
+        rest = value[len(o):]
+        if rest.strip("/\\") == "":
+            return new
+        if rest[0] not in "/\\":
+            continue
+        if "\\" in new or re.match(r"^[A-Za-z]:", new):
+            rest = rest.replace("/", "\\")
+        elif "/" in new:
+            rest = rest.replace("\\", "/")
+        return new.rstrip("/\\") + rest
+    return value
 
 
 def _bad_member(name: str) -> Optional[str]:
@@ -172,6 +347,10 @@ def _export_memory(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[s
         except (OSError, UnicodeDecodeError):
             notes.append({"item": f"memory/{p.name}", "reason": "not readable as UTF-8 text"})
             continue
+        shape = credential_shape(text)
+        if shape:
+            notes.append({"item": f"memory/{p.name}", "reason": _cred_reason(shape)})
+            continue
         n = len(_entries(text))
         members.append((f"memory/{p.name}", text.encode("utf-8")))
         files.append({"file": p.name, "block": known.get(p.name, ""), "entries": n})
@@ -212,7 +391,12 @@ def _export_profiles(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple
         elif not isinstance(_read_json_file(p), dict):
             notes.append({"item": item, "reason": "not a JSON object"})
         else:
-            members.append((f"profiles/{p.name.lower()}", p.read_bytes()))
+            data = p.read_bytes()
+            shape = credential_shape(data)
+            if shape:
+                notes.append({"item": item, "reason": _cred_reason(shape)})
+                continue
+            members.append((f"profiles/{p.name.lower()}", data))
             names.append(p.stem.lower())
     return members, {"count": len(names), "names": names}
 
@@ -238,10 +422,16 @@ def _export_skills(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[s
             if child.stat().st_size > MAX_SKILL_BYTES:
                 notes.append({"item": item, "reason": f"larger than {MAX_SKILL_BYTES // (1024 * 1024)} MB"})
                 continue
-            members.append((item, child.read_bytes()))
+            data = child.read_bytes()
+            shape = credential_shape(data)
+            if shape:
+                notes.append({"item": item, "reason": _cred_reason(shape)})
+                continue
+            members.append((item, data))
             names.append(child.name)
             continue
-        files: List[Tuple[str, Path]] = []
+        files: List[Tuple[str, bytes]] = []
+        found: List[Dict[str, str]] = []
         total, too_big, has_skill = 0, False, False
         for dirpath, dirnames, filenames in os.walk(child):
             dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS and not is_secret(d))
@@ -250,28 +440,124 @@ def _export_skills(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[s
                 rel = "skills/" + fp.relative_to(root).as_posix()
                 if fp.is_symlink() or not fp.is_file():
                     continue
-                if is_secret(fn):
+                if _secret_path(rel):
                     notes.append({"item": rel, "reason": "name looks like a secret"})
                     continue
                 if _bad_member(rel):
                     notes.append({"item": rel, "reason": "name cannot be stored portably"})
                     continue
-                total += fp.stat().st_size
-                if total > MAX_SKILL_BYTES:
+                size = fp.stat().st_size
+                if total + size > MAX_SKILL_BYTES:
                     too_big = True
                     break
-                files.append((rel, fp))
+                data = fp.read_bytes()
+                shape = credential_shape(data)
+                if shape:
+                    found.append({"item": rel, "reason": _cred_reason(shape)})
+                    continue
+                total += size
+                files.append((rel, data))
                 has_skill = has_skill or fn == "SKILL.md"
             if too_big:
                 break
         if too_big:
             notes.append({"item": item, "reason": f"larger than {MAX_SKILL_BYTES // (1024 * 1024)} MB"})
-        elif not has_skill:
+            continue
+        notes += found
+        if not has_skill:
             notes.append({"item": item, "reason": "no SKILL.md"})
         else:
-            members += [(rel, fp.read_bytes()) for rel, fp in files]
+            members += files
             names.append(child.name)
     return members, {"count": len(names), "names": names}
+
+
+def _export_files(root: Path, prefix: str, suffix: str, notes: List[Dict[str, str]], recursive: bool = False,
+                  only: Optional[List[str]] = None, json_object: bool = False) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    """Text files under `root` as `prefix + relative path`: `only` names them, else every `*suffix` file."""
+    members: List[Tuple[str, bytes]] = []
+    names: List[str] = []
+    paths: List[Path] = []
+    if root.is_dir() and only is not None:
+        actual = {p.name for p in root.iterdir()}
+        seen = set()
+        for name in only:  # on a case-insensitive disk AGENTS.md and AGENTS.MD are one file: take it once
+            if name in actual and name.lower() not in seen:
+                seen.add(name.lower())
+                paths.append(root / name)
+    elif root.is_dir() and recursive:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames if d not in _SKIP_DIRS)
+            paths += [Path(dirpath) / fn for fn in sorted(filenames) if fn.lower().endswith(suffix)]
+    elif root.is_dir():
+        paths = [p for p in sorted(root.iterdir(), key=lambda p: p.name.lower()) if p.name.lower().endswith(suffix)]
+    for fp in paths:
+        rel = fp.relative_to(root).as_posix()
+        item = prefix + rel
+        if fp.is_symlink() or not fp.is_file():
+            continue
+        if _secret_path(rel):
+            notes.append({"item": item, "reason": "name looks like a secret"})
+            continue
+        if _bad_member(item):
+            notes.append({"item": item, "reason": "name cannot be stored portably"})
+            continue
+        if fp.stat().st_size > MAX_TEXT_FILE:
+            notes.append({"item": item, "reason": f"larger than {MAX_TEXT_FILE // (1024 * 1024)} MB"})
+            continue
+        try:
+            data = fp.read_bytes()
+            text = data.decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            notes.append({"item": item, "reason": "not readable as UTF-8 text"})
+            continue
+        shape = credential_shape(text)
+        if shape:
+            notes.append({"item": item, "reason": _cred_reason(shape)})
+            continue
+        if json_object and not isinstance(_loads(text), dict):
+            notes.append({"item": item, "reason": "not a JSON object"})
+            continue
+        members.append((item, data))
+        names.append(rel)
+    return members, {"count": len(names), "names": names}
+
+
+def _loads(text: str) -> Any:
+    try:
+        return json.loads(text[1:] if text.startswith("﻿") else text)
+    except ValueError:
+        return None
+
+
+def _export_instructions(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    return _export_files(Path(sess.agent_dir), "instructions/", ".md", notes, only=instruction_names())
+
+
+def _export_prompts(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    return _export_files(Path(sess.agent_dir) / "prompts", "prompts/", ".md", notes, recursive=True)
+
+
+def _export_personas(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    return _export_files(Path(sess.agent_dir) / "personas", "personas/", ".md", notes)
+
+
+def _export_themes(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    return _export_files(Path(sess.agent_dir) / "themes", "themes/", ".json", notes, json_object=True)
+
+
+def _export_settings(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
+    p = Path(sess.agent_dir) / "settings.json"
+    if not p.is_file():
+        return [], {"count": 0, "keys": [], "dropped": []}
+    data = _read_json_file(p)
+    if not isinstance(data, dict):
+        notes.append({"item": "settings.json", "reason": "not a JSON object"})
+        return [], {"count": 0, "keys": [], "dropped": []}
+    kept, dropped = portable_settings(data)
+    for name, why in dropped:
+        notes.append({"item": f"settings.json: {name}", "reason": why})
+    return [("settings.json", _json_bytes(kept))], {"count": len(kept), "keys": sorted(kept), "dropped": sorted(n for n, _ in dropped)}
 
 
 def _export_capabilities(sess: Any, notes: List[Dict[str, str]]) -> Tuple[List[Tuple[str, bytes]], Dict[str, Any]]:
@@ -354,7 +640,8 @@ def export_agent(agent_dir: Any, out_path: Any, profile: Any = None,
     notes: List[Dict[str, str]] = []
     collectors = {"memory": _export_memory, "archive": _export_archive, "profiles": _export_profiles,
                   "skills": _export_skills, "capabilities": _export_capabilities, "cron": _export_cron,
-                  "keybindings": _export_keybindings}
+                  "keybindings": _export_keybindings, "instructions": _export_instructions, "prompts": _export_prompts,
+                  "personas": _export_personas, "themes": _export_themes, "settings": _export_settings}
     members: List[Tuple[str, bytes]] = []
     info: Dict[str, Any] = {}
     for name in wanted:
@@ -366,7 +653,7 @@ def export_agent(agent_dir: Any, out_path: Any, profile: Any = None,
                 "platform": sys.platform, "profile": prof_name, "included": wanted, "sections": info,
                 "excluded": EXCLUDED, "skipped": notes,
                 "notes": ["board cards keep their project folder and cron jobs their working folder; both are paths "
-                          "from the machine that wrote this file"]}
+                          "from the machine that wrote this file (import with --map-path OLD=NEW to rewrite them)"]}
     out = Path(out_path)
     if out.is_dir():
         out = out / default_name(now)
@@ -378,7 +665,7 @@ def export_agent(agent_dir: Any, out_path: Any, profile: Any = None,
         with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
             z.writestr("manifest.json", _json_bytes(manifest))
             for name, data in members:
-                if is_secret(name.rsplit("/", 1)[-1]):  # belt and braces: nothing secret-named is ever written
+                if _secret_path(name) and name != "settings.json":  # belt and braces: nothing secret-named is ever written
                     continue
                 z.writestr(name, data)
         os.replace(tmp, out)
@@ -437,6 +724,8 @@ class _Reader:
         self.manifest = manifest
         inc = manifest.get("included")
         self.included = [s for s in SECTIONS if s in inc] if isinstance(inc, list) else list(SECTIONS)
+        # sections a newer Omni wrote: reported, never a reason to refuse the file
+        self.unknown = [str(s)[:60] for s in inc if not (isinstance(s, str) and s in SECTIONS)] if isinstance(inc, list) else []
 
     def read(self, name: str, limit: int = MAX_TOTAL_BYTES) -> bytes:
         limit = min(limit, self.budget)
@@ -479,9 +768,12 @@ def inspect_agent(path: Any) -> Dict[str, Any]:
             elif s == "board":
                 cards = _member_json(r, "board.json", {}).get("cards") or []
                 listing[s] = [f"#{c.get('id')} [{c.get('status')}] {c.get('title')}" for c in cards if isinstance(c, dict)]
-            else:  # capabilities, keybindings
+            elif s in ("instructions", "prompts", "personas", "themes"):
+                listing[s] = [f"{n[len(s) + 1:]} ({r.sizes[n]} bytes)" for n in r.under(s + "/")]
+            else:  # capabilities, keybindings, settings
                 listing[s] = sorted(str(k) for k in _member_json(r, f"{s}.json", {}))
-        return {"path": str(r.path), "manifest": r.manifest, "sections": listing, "members": len(r.names), "bytes": r.total}
+        return {"path": str(r.path), "manifest": r.manifest, "sections": listing, "members": len(r.names), "bytes": r.total,
+                "unknown_sections": list(r.unknown)}
     finally:
         r.close()
 
@@ -498,11 +790,14 @@ def _member_json(r: _Reader, name: str, default: Any) -> Any:
 
 # ------------------------------------------------------------------------------------------- import
 class _Import:
-    def __init__(self, agent: Path, reader: _Reader, replace: bool, dry: bool):
+    def __init__(self, agent: Path, reader: _Reader, replace: bool, dry: bool,
+                 profile: Optional[Dict[str, Any]] = None, pairs: Optional[List[Tuple[str, str]]] = None):
         self.agent, self.r, self.replace, self.dry = agent, reader, replace, dry
         self.skipped: List[Dict[str, str]] = []
         self.notes: List[str] = []
-        self.sess = _stand_in(agent)
+        self.sess = _stand_in(agent, profile=profile)
+        self.pairs = pairs or []
+        self.mapped = 0  # board projects and cron folders rewritten by the path map
 
     def skip(self, item: str, reason: str) -> None:
         self.skipped.append({"item": item, "reason": reason})
@@ -515,8 +810,8 @@ class _Import:
     def memory(self) -> Dict[str, int]:
         from .caps import memory as mem
         n = self.counts()
-        d = self.agent / "memories"
-        limits = {mem.FILES[k]: mem.LIMITS[k] for k in mem.FILES}
+        d = mem.memory_dir(self.sess)  # <agent-dir>/memories, or where the --profile keeps its memory
+        limits = {spec["file"]: spec["limit"] for spec in mem.blocks(self.sess).values()}
         for name in self.r.under("memory/"):
             fn = name[len("memory/"):]
             if not _MEMORY_FILE.match(fn) or is_secret(fn):
@@ -528,6 +823,10 @@ class _Import:
                 new = list(dict.fromkeys(_entries(text)))
             except UnicodeDecodeError:
                 self.skip(name, "not UTF-8 text")
+                continue
+            shape = credential_shape(text)
+            if shape:
+                self.skip(name, _cred_reason(shape))
                 continue
             old = mem.read_entries(d, "", fn)
             if self.replace:
@@ -625,6 +924,10 @@ class _Import:
             if not isinstance(parsed, dict):
                 self.skip(name, "not a JSON object")
                 continue
+            shape = credential_shape(data)
+            if shape:
+                self.skip(name, _cred_reason(shape))
+                continue
             target = _inside(d, fn)
             if target.exists():
                 if _read_json_file(target) == parsed:
@@ -662,12 +965,20 @@ class _Import:
                 self.skip(item, f"larger than {MAX_SKILL_BYTES // (1024 * 1024)} MB")
                 continue
             dest = _inside(root, top)
-            files: List[Tuple[Path, str]] = []
+            files: List[Tuple[Path, bytes]] = []
             for x in names:
-                if any(is_secret(part) for part in x.split("/")[1:]):
+                if _secret_path(x[len("skills/"):]):
                     self.skip(x, "name looks like a secret")
                     continue
-                files.append((_inside(root, x[len("skills/"):]), x))
+                data = self.r.read(x, MAX_SKILL_BYTES)
+                shape = credential_shape(data)
+                if shape:
+                    self.skip(x, _cred_reason(shape))
+                    continue
+                files.append((_inside(root, x[len("skills/"):]), data))
+            if not any(t == dest or t.name == "SKILL.md" for t, _ in files):
+                self.skip(item, "not a skill (its SKILL.md was left out)")
+                continue
             if dest.exists():
                 if not self.replace:
                     self.skip(item, "a skill with this name exists (kept; use --replace to overwrite)")
@@ -681,8 +992,119 @@ class _Import:
                 shutil.rmtree(dest)
             elif dest.exists():
                 dest.unlink()
-            for target, x in files:
-                _write(target, self.r.read(x, MAX_SKILL_BYTES))
+            for target, data in files:
+                _write(target, data)
+        return n
+
+    def _files(self, prefix: str, root: Path, suffix: str, what: str, nested: bool = False,
+               allowed: Optional[List[str]] = None, json_object: bool = False) -> Dict[str, int]:
+        """Text files, one member each: merge keeps a file that exists and reports it, replace overwrites it."""
+        n = self.counts()
+        for name in self.r.under(prefix):
+            rel = name[len(prefix):]
+            if allowed is not None:
+                ok = rel in allowed
+            else:
+                ok = rel.lower().endswith(suffix) and len(rel) > len(suffix) and (nested or "/" not in rel)
+            if not ok:
+                self.skip(name, f"not {what} file name")
+                continue
+            if _secret_path(rel):
+                self.skip(name, "name looks like a secret")
+                continue
+            if self.r.sizes[name] > MAX_TEXT_FILE:
+                self.skip(name, f"larger than {MAX_TEXT_FILE // (1024 * 1024)} MB")
+                continue
+            data = self.r.read(name, MAX_TEXT_FILE)
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                self.skip(name, "not UTF-8 text")
+                continue
+            shape = credential_shape(text)
+            if shape:
+                self.skip(name, _cred_reason(shape))
+                continue
+            if json_object and not isinstance(_loads(text), dict):
+                self.skip(name, "not a JSON object")
+                continue
+            target = _inside(root, rel)
+            if target.is_dir():
+                self.skip(name, "a folder with this name exists")
+                continue
+            if target.exists():
+                if target.read_bytes() == data:
+                    n["unchanged"] += 1
+                    continue
+                if not self.replace:
+                    self.skip(name, f"{what} file with this name exists (kept; use --replace to overwrite)")
+                    continue
+                n["updated"] += 1
+            else:
+                n["added"] += 1
+            if not self.dry:
+                _write(target, data)
+        return n
+
+    def instructions(self) -> Dict[str, int]:
+        return self._files("instructions/", self.agent, ".md", "an instruction", allowed=instruction_names())
+
+    def prompts(self) -> Dict[str, int]:
+        return self._files("prompts/", self.agent / "prompts", ".md", "a prompt template", nested=True)
+
+    def personas(self) -> Dict[str, int]:
+        return self._files("personas/", self.agent / "personas", ".md", "a persona")
+
+    def themes(self) -> Dict[str, int]:
+        return self._files("themes/", self.agent / "themes", ".json", "a theme", json_object=True)
+
+    def settings(self) -> Dict[str, int]:
+        """The portable preferences, key by key: merge keeps what is set here, replace takes the file's value.
+        Keys that are not in the file are never removed, and nothing outside the allowlist is ever written."""
+        n = self.counts()
+        if "settings.json" not in self.r.sizes:
+            return n
+        try:
+            parsed = json.loads(self.r.read("settings.json", MAX_SMALL_FILE).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            parsed = None
+        if not isinstance(parsed, dict):
+            self.skip("settings.json", "not a JSON object")
+            return n
+        new, dropped = portable_settings(parsed)
+        for name, why in dropped:
+            self.skip(f"settings.json: {name}", why)
+        target = self.agent / "settings.json"
+        old = _read_json_file(target) if target.exists() else {}
+        if not isinstance(old, dict):
+            self.skip("settings.json", "the settings file here is not a JSON object (left alone)")
+            return n
+
+        def fill(a: Any, b: Any) -> Any:   # what is here wins, missing nested keys arrive
+            if isinstance(a, dict) and isinstance(b, dict):
+                return {**a, **{k: (fill(a[k], v) if k in a else v) for k, v in b.items()}}
+            return a
+
+        def over(a: Any, b: Any) -> Any:   # the file wins, nested keys it does not name stay
+            if isinstance(a, dict) and isinstance(b, dict):
+                return {**a, **{k: (over(a[k], v) if k in a else v) for k, v in b.items()}}
+            return b
+
+        final = dict(old)
+        for k, v in new.items():
+            if k not in old:
+                final[k] = v
+                n["added"] += 1
+                continue
+            final[k] = over(old[k], v) if self.replace else fill(old[k], v)
+            if final[k] != old[k]:
+                n["updated"] += 1
+            else:
+                n["unchanged"] += 1
+            if not self.replace and over(final[k], v) != final[k]:
+                self.skip(f"settings.json: {k}", "already set differently here (kept)")
+        if final != old and not self.dry:
+            _write(_inside(self.agent, "settings.json"), _json_bytes(final))
         return n
 
     def _json_object(self, member: str, target: Path) -> Dict[str, int]:
@@ -741,6 +1163,11 @@ class _Import:
                 continue
             j = {k: v for k, v in j.items() if k not in ("running_since", "signal_payload")}
             j.setdefault("name", j["prompt"].strip()[:40])
+            if self.pairs and j.get("cwd"):
+                mapped = _map_path(j["cwd"], self.pairs)
+                if mapped != j["cwd"]:
+                    j["cwd"] = mapped
+                    self.mapped += 1
             if j.get("enabled"):
                 if j.get("cwd") and not os.path.isdir(str(j["cwd"])):
                     j["enabled"], j["next_run"] = False, None
@@ -787,7 +1214,14 @@ class _Import:
             if not isinstance(c, dict) or not isinstance(c.get("title"), str) or not c["title"].strip():
                 self.skip("board card", "not a card (no title)")
                 continue
+            if self.pairs and c.get("project"):
+                mapped = _map_path(c["project"], self.pairs)
+                if mapped != c["project"]:
+                    c = dict(c, project=mapped)
+                    self.mapped += 1
             cards.append(c)
+        if scope and self.pairs:
+            scope = _map_path(scope, self.pairs)
 
         def key(c: Dict[str, Any]) -> Tuple[Any, ...]:
             return (c.get("project") or "", c.get("title"), c.get("body") or "", c.get("created"))
@@ -831,12 +1265,33 @@ class _Import:
         return n
 
 
+def _import_profile(profile: Any, r: _Reader) -> Dict[str, Any]:
+    """The profile that decides where memory goes: a loaded profile, an installed one, or one carried by the file."""
+    if isinstance(profile, dict):
+        return profile
+    if not profile:
+        return {}
+    from . import profiles as profiles_mod
+    name = profiles_mod.canonical(str(profile))
+    if name in profiles_mod.BUILTIN or profiles_mod._raw(name) is not None:
+        return profiles_mod.load_profile(name)
+    member = f"profiles/{name}.json"
+    carried = _member_json(r, member, {}) if member in r.sizes and _PROFILE_FILE.match(f"{name}.json") else None
+    if carried:
+        return carried
+    raise AgentFileError(f"unknown profile '{profile}': it is not installed here and not in the file")
+
+
 def import_agent(agent_dir: Any, path: Any, mode: str = "merge", sections: Optional[Iterable[str]] = None,
-                 dry_run: bool = False) -> Dict[str, Any]:
+                 dry_run: bool = False, profile: Any = None, path_map: Any = None) -> Dict[str, Any]:
     """Bring an agent file into `agent_dir`.
 
     `mode="merge"` adds what is missing and keeps what is there; `mode="replace"` makes each included section match
     the file. `sections` limits the import (default: every section in the file). `dry_run` changes nothing.
+    `profile` (a name or a loaded profile) decides where memory is written, as it does for export: a profile can
+    move the memory folder (`memory.dir`). Without it memory goes to `<agent-dir>/memories`.
+    `path_map` ({old: new}, [(old, new)] or ["OLD=NEW"]) rewrites board project folders and cron working folders
+    that start with `old`.
     Returns {"path", "mode", "dry_run", "sections": {name: {added, updated, unchanged, removed}},
     "skipped": [{"item", "reason"}], "notes": [...], "manifest": {...}}. Raises AgentFileError when the file is
     refused as a whole (not an agent file, unknown format version, unsafe paths, too large).
@@ -844,18 +1299,24 @@ def import_agent(agent_dir: Any, path: Any, mode: str = "merge", sections: Optio
     if mode not in ("merge", "replace"):
         raise AgentFileError("mode must be 'merge' or 'replace'")
     wanted = _sections(sections) if sections is not None else None
+    pairs = _path_pairs(path_map)
     r = _Reader(path)
     try:
-        imp = _Import(Path(agent_dir), r, mode == "replace", bool(dry_run))
+        imp = _Import(Path(agent_dir), r, mode == "replace", bool(dry_run), _import_profile(profile, r), pairs)
         result: Dict[str, Dict[str, int]] = {}
         for s in (wanted if wanted is not None else r.included):
             if s not in r.included:
                 imp.skip(s, "this section is not in the file")
                 continue
             result[s] = getattr(imp, s)()
-        known = ("manifest.json", "archive.jsonl", "capabilities.json", "cron.json", "keybindings.json", "board.json")
+        for s in r.unknown:
+            imp.skip(s, "unknown section: this Omni does not know it (written by a newer version?)")
+        if imp.mapped:
+            imp.notes.append(f"{imp.mapped} folder(s) of board cards and scheduled jobs rewritten by the path mapping")
+        known = ("manifest.json", "archive.jsonl", "capabilities.json", "cron.json", "keybindings.json", "board.json", "settings.json")
         for name in r.names:
-            if name not in known and not name.startswith(("memory/", "profiles/", "skills/")):
+            if name not in known and not name.startswith(tuple(f"{s}/" for s in ("memory", "profiles", "skills", "instructions",
+                                                                                 "prompts", "personas", "themes"))):
                 imp.skip(name, "not part of any section")
         return {"path": str(r.path), "mode": mode, "dry_run": bool(dry_run), "sections": result,
                 "skipped": imp.skipped, "notes": imp.notes, "manifest": r.manifest}
@@ -865,9 +1326,11 @@ def import_agent(agent_dir: Any, path: Any, mode: str = "merge", sections: Optio
 
 # ------------------------------------------------------------------------------------------- command line
 USAGE = ("usage: omni agent export [FILE] [--profile NAME] [--only a,b] [--without a,b]\n"
-         "       omni agent import FILE [--replace] [--only a,b] [--dry-run]\n"
+         "       omni agent import FILE [--replace] [--only a,b] [--dry-run] [--profile NAME] [--map-path OLD=NEW]...\n"
          "       omni agent inspect FILE\n"
-         f"sections: {', '.join(SECTIONS)}")
+         f"sections: {', '.join(SECTIONS)}\n"
+         "import --profile NAME   write memory where that profile keeps it (its memory.dir)\n"
+         "import --map-path O=N   rewrite board project folders and cron working folders that start with O (repeatable)")
 
 
 def _say(text: str = "") -> None:
@@ -882,21 +1345,25 @@ def _size(n: int) -> str:
     return f"{n} bytes" if n < 1024 else f"{n / 1024:.1f} KB" if n < 1024 * 1024 else f"{n / (1024 * 1024):.1f} MB"
 
 
-def _parse(args: List[str], valued: Tuple[str, ...], flags: Tuple[str, ...]) -> Tuple[List[str], Dict[str, Any]]:
-    """-> (positionals, options); raises AgentFileError on anything unexpected."""
+def _parse(args: List[str], valued: Tuple[str, ...], flags: Tuple[str, ...],
+           repeated: Tuple[str, ...] = ()) -> Tuple[List[str], Dict[str, Any]]:
+    """-> (positionals, options); raises AgentFileError on anything unexpected. `repeated` options collect a list."""
     pos: List[str] = []
     opts: Dict[str, Any] = {}
     i = 0
     while i < len(args):
         a = args[i]
         key, eq, val = a.partition("=")
-        if key in valued:
+        if key in valued or key in repeated:
             if not eq:
                 i += 1
                 if i >= len(args):
                     raise AgentFileError(f"{key} needs a value")
                 val = args[i]
-            opts[key] = val
+            if key in repeated:
+                opts.setdefault(key, []).append(val)
+            else:
+                opts[key] = val
         elif a in flags:
             opts[a] = True
         elif a.startswith("-") and a != "-":
@@ -926,12 +1393,13 @@ def cli(argv: List[str], agent_dir: Any) -> int:
             if not include:
                 raise AgentFileError("no sections left to export")
         elif sub == "import":
-            pos, opts = _parse(argv[1:], ("--only",), ("--replace", "--dry-run"))
+            pos, opts = _parse(argv[1:], ("--only", "--profile"), ("--replace", "--dry-run"), ("--map-path",))
             if len(pos) != 1:
                 raise AgentFileError("import needs one FILE")
             only = _sections(opts["--only"]) if "--only" in opts else None
             if only is not None and not only:
                 raise AgentFileError("--only names no section")
+            pairs = _path_pairs(opts.get("--map-path"))
         elif sub == "inspect":
             pos, opts = _parse(argv[1:], (), ())
             if len(pos) != 1:
@@ -957,7 +1425,7 @@ def cli(argv: List[str], agent_dir: Any) -> int:
             _say("Credentials, session transcripts and cron output are never included.")
         elif sub == "import":
             s = import_agent(agent_dir, pos[0], mode="replace" if opts.get("--replace") else "merge", sections=only,
-                             dry_run=bool(opts.get("--dry-run")))
+                             dry_run=bool(opts.get("--dry-run")), profile=opts.get("--profile"), path_map=pairs)
             _say(("Dry run, nothing written. " if s["dry_run"] else "") + f"Import of {s['path']} ({s['mode']}):")
             for name, n in s["sections"].items():
                 _say(f"  {name:<13} " + ", ".join(f"{v} {k}" for k, v in n.items() if v or k == "added"))
@@ -976,6 +1444,8 @@ def cli(argv: List[str], agent_dir: Any) -> int:
                     _say(f"      {it}")
                 if len(items) > 20:
                     _say(f"      ... and {len(items) - 20} more")
+            for name in s["unknown_sections"]:
+                _say(f"  {name:<13} (unknown section: this Omni cannot import it)")
             for x in m.get("skipped") or []:
                 if isinstance(x, dict):
                     _say(f"  left out at export: {x.get('item')} ({x.get('reason')})")

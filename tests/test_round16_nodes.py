@@ -380,12 +380,12 @@ class TestNodeCli(Round16):
         with self.assertRaises(OSError):
             socket.create_connection(srv.server_address[:2], timeout=2).close()
 
-        fake = mock.Mock(url="http://box:8765", token="given", root=str(self.root), _thread=None)
+        fake = mock.Mock(url="http://box:8765", token="given", root=str(self.root), _thread=None, tls=False, fingerprint=None, pair_code=None)
         with mock.patch.object(node_server, "serve", return_value=fake) as serve:
             code, out = self.run_cli("serve", "--root", str(self.root), "--host", "0.0.0.0", "--port", "9001", "--token", "given")
         self.assertEqual(code, 0)
         self.assertEqual(serve.call_args[0], (str(self.root), "0.0.0.0", 9001, "given"))
-        self.assertEqual(serve.call_args[1], {"allow_write": True})
+        self.assertEqual(serve.call_args[1], {"allow_write": True, "certfile": None, "keyfile": None, "pair": False})
         self.assertIn("WARNING", out)
         self.assertIn("plain HTTP", out)
         self.assertIn("tunnel", out)
@@ -394,6 +394,142 @@ class TestNodeCli(Round16):
         self.assertEqual(self.run_cli("serve", "--bogus")[0], 2)
         self.assertEqual(self.run_cli("serve", "--root")[0], 2)
         self.assertEqual(self.run_cli("serve", "--root", str(self.root / "missing"), "--port", "0")[0], 1)
+
+
+
+_CERT_DIR = None
+
+
+def cert_pair():
+    """A throwaway self-signed certificate for 127.0.0.1, made once per run; None without openssl."""
+    global _CERT_DIR
+    import shutil
+    if not shutil.which("openssl"):
+        return None
+    if _CERT_DIR is None:
+        d = Path(tempfile.mkdtemp(prefix="omni-node-cert-"))
+        r = subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-days", "2", "-nodes",
+                            "-keyout", str(d / "key.pem"), "-out", str(d / "cert.pem"), "-subj", "/CN=127.0.0.1",
+                            "-addext", "subjectAltName=IP:127.0.0.1"], capture_output=True, text=True)
+        if r.returncode != 0:
+            return None
+        _CERT_DIR = d
+    return str(_CERT_DIR / "cert.pem"), str(_CERT_DIR / "key.pem")
+
+
+class TestTlsAndPairing(Round16):
+    def tls_server(self, **kw):
+        pair = cert_pair()
+        if pair is None:
+            self.skipTest("openssl is not on PATH, so no test certificate can be made")
+        return self.serve(certfile=pair[0], keyfile=pair[1], **kw), pair
+
+    def run_cli(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = node_server.cli(list(argv), self.agent)
+        return code, out.getvalue()
+
+    def test_https_with_a_pinned_fingerprint(self):
+        srv, (cert, _key) = self.tls_server()
+        self.assertTrue(srv.url.startswith("https://") and srv.tls)
+        self.assertEqual(srv.fingerprint, node_server.cert_fingerprint(cert))
+        code, _ = self.run_cli("add", "box", srv.url, srv.token, "--fingerprint", srv.fingerprint)
+        self.assertEqual(code, 0)
+        s = self.profile()
+        (self.root / "hello.txt").write_text("over tls", encoding="utf-8")
+        self.assertIn("over tls", self.text(self.node(s, action="read", node="box", path="hello.txt")))
+        info = node_server.post_json(srv.url + "/v1/info", {}, srv.token, fingerprint=srv.fingerprint)
+        self.assertTrue(info["tls"])
+        self.assertIn("https, certificate pinned", s.caps.commands()["nodes"][1](""))
+
+        wrong = "sha256:" + ":".join(["AB"] * 32)
+        self.run_cli("add", "box", srv.url, srv.token, "--fingerprint", wrong)
+        r = self.node(s, action="info", node="box")
+        self.assertTrue(r.get("isError"))
+        self.assertIn("does not match the pinned fingerprint", self.text(r))
+
+    def test_private_ca_and_plain_verification(self):
+        srv, (cert, _key) = self.tls_server()
+        self.assertEqual(self.run_cli("add", "box", srv.url, srv.token, "--ca", cert)[0], 0)
+        s = self.profile()
+        self.assertFalse(self.node(s, action="info", node="box").get("isError"))
+        self.run_cli("add", "box", srv.url, srv.token)            # https with neither: normal verification fails
+        r = self.node(s, action="info", node="box")
+        self.assertTrue(r.get("isError"))
+        self.assertEqual(self.run_cli("add", "x", "http://h:1", "t", "--fingerprint", srv.fingerprint)[0], 2)
+        self.assertEqual(self.run_cli("add", "x", srv.url, "t", "--fingerprint", "nonsense")[0], 2)
+        self.assertEqual(self.run_cli("add", "x", srv.url, "t", "--ca", str(self.root / "missing.pem"))[0], 2)
+
+    def test_pairing(self):
+        srv = self.serve(pair=True)
+        code = srv.pair_code
+        self.assertEqual(len(code), 8)
+        rc, out = self.run_cli("pair", "box", srv.url, code.lower())
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn(srv.token, out)
+        entry = node_server.load_nodes(self.agent)["box"]
+        self.assertNotEqual(entry["token"], srv.token)                          # a token of its own
+        self.assertNotIn(entry["token"], out)                                  # never printed
+        s = self.profile()
+        self.assertFalse(self.node(s, action="info", node="box").get("isError"))
+        rc, out = self.run_cli("pair", "box2", srv.url, code)                    # single use
+        self.assertEqual(rc, 1)
+        self.assertIn("already used", out)
+        self.assertEqual(node_server.post_json(srv.url + "/v1/info", {}, entry["token"])["paired_clients"], 1)
+
+        clients = node_server.load_clients(self.root)
+        self.assertEqual(len(clients), 1)
+        self.assertNotIn(entry["token"], node_server.clients_path(self.root).read_text(encoding="utf-8"))   # only a hash
+        srv.shutdown()
+        again = self.serve()                                                    # survives a restart
+        self.assertIn('"tls": false', json.dumps(node_server.post_json(again.url + "/v1/info", {}, entry["token"])))
+        name = next(iter(clients))
+        rc, out = self.run_cli("serve", "--root", str(self.root), "--revoke", name)
+        self.assertEqual(rc, 0, out)
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            node_server.post_json(again.url + "/v1/info", {}, entry["token"])
+        self.assertEqual(e.exception.code, 401)
+        self.assertEqual(self.run_cli("serve", "--root", str(self.root), "--revoke", "ghost")[0], 1)
+
+    def test_pairing_lockout_expiry_and_off(self):
+        import urllib.error
+
+        def pair(srv, code):
+            try:
+                return node_server.post_json(srv.url + "/v1/pair", {"code": code, "name": "me"})
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read().decode("utf-8"))["error"]
+
+        off = self.serve()
+        self.assertEqual(pair(off, "ABCDEFGH")[0], 403)
+        srv = self.serve(pair=True)
+        for left in (4, 3, 2, 1):
+            code, why = pair(srv, "WRONG123")
+            self.assertEqual(code, 401)
+            self.assertIn(f"{left} attempt", why)
+        self.assertIn("pairing is now disabled", pair(srv, "WRONG123")[1])
+        code, why = pair(srv, srv.pair_code)                                    # even the right code, once locked
+        self.assertEqual(code, 403)
+
+        late = self.serve(pair=True)
+        with mock.patch.object(node_server, "_clock", return_value=time.time() + node_server.PAIR_TTL + 1):
+            code, why = pair(late, late.pair_code)
+        self.assertEqual(code, 403)
+        self.assertIn("expired", why)
+
+    def test_serve_cli_tls_flags(self):
+        rc, out = self.run_cli("serve", "--root", str(self.root), "--cert", "c.pem")
+        self.assertEqual(rc, 2)
+        self.assertIn("go together", out)
+        rc, out = self.run_cli("serve", "--root", str(self.root), "--self-signed")
+        self.assertEqual(rc, 2)
+        self.assertIn("openssl req -x509", out)
+        with mock.patch.object(node_server, "serve", side_effect=OSError("port taken")):
+            self.assertEqual(self.run_cli("serve", "--root", str(self.root), "--pair")[0], 1)
+        self.assertEqual(self.run_cli("serve", "--bogus")[0], 2)
+        self.assertEqual(self.run_cli("list", "--ca", "x")[0], 2)
 
 
 if __name__ == "__main__":

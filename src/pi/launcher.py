@@ -181,6 +181,30 @@ def maybe_launch_pi(argv: Optional[List[str]] = None) -> None:
         from . import resources as res
         from .agentfile import cli as agent_cli
         hard_exit(agent_cli(raw[1:], res.agent_dir()))
+    if raw == ["update"]:
+        from pathlib import Path
+        from .batch import update
+        hard_exit(update(Path(__file__).resolve().parents[2]))
+    if raw[:1] in (["web"], ["batch"]):   # the agent in a browser tab; many prompts without a window
+        from pathlib import Path
+        from . import resources as res
+        from .agent import AgentSession, SessionOptions
+        from .modes import HeadlessUI
+        from .profiles import active_profile_name, canonical
+
+        def started(profile, model, cwd, ui, mode, no_session):
+            plug = Path(__file__).resolve().parents[2] / "plugins" / "pi"
+            session = AgentSession(SessionOptions(cwd=cwd or os.getcwd(), model=model, mode=mode, no_session=no_session,
+                                                  profile=canonical(profile) if profile else active_profile_name(),
+                                                  agent_dir=str(res.agent_dir()),
+                                                  omni_plugin_dir=str(plug) if plug.is_dir() else None), ui=ui)
+            session.start()
+            return session
+        if raw[0] == "web":
+            from .web import cli as web_cli
+            hard_exit(web_cli(raw[1:], lambda profile, model, ui: started(profile, model, None, ui, "interactive", False)))
+        from .batch import cli as batch_cli
+        hard_exit(batch_cli(raw[1:], lambda profile, model, cwd: started(profile, model, cwd, HeadlessUI(), "print", True)))
     if raw[:2] == ["mcp", "serve"] or raw[:1] == ["acp"]:   # Omni as a server for other agents (MCP) and editors (ACP)
         from pathlib import Path
         from . import resources as res

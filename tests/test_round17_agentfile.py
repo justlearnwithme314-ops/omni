@@ -167,7 +167,8 @@ class AgentFileCase(unittest.TestCase):
         self.assertEqual(result["mode"], "merge")
         self.assertEqual(result["skipped"], [])
         self.assertEqual({k: v["added"] for k, v in result["sections"].items()},
-                         {"memory": 4, "archive": 2, "profiles": 1, "skills": 1, "capabilities": 2, "cron": 1, "keybindings": 1, "board": 2})
+                         {"memory": 4, "archive": 2, "profiles": 1, "skills": 1, "capabilities": 2, "cron": 1, "keybindings": 1, "board": 2,
+                          "instructions": 0, "prompts": 0, "personas": 0, "themes": 0, "settings": 0})
 
         for fn in ("MEMORY.md", "USER.md", "PERSONA.md"):
             self.assertEqual((self.dst / "memories" / fn).read_bytes(), (self.src / "memories" / fn).read_bytes(), fn)
@@ -447,7 +448,8 @@ class AgentFileCase(unittest.TestCase):
         self.assertIn("Wrote", text)
         self.assertIn("huge-skill", text)
         self.assertNotIn(SECRET, text)
-        self.assertEqual(agentfile.inspect_agent(out)["manifest"]["included"], ["memory", "archive", "profiles", "skills", "capabilities", "keybindings"])
+        self.assertEqual(agentfile.inspect_agent(out)["manifest"]["included"], ["memory", "archive", "profiles", "skills", "capabilities", "keybindings",
+                                                                              "instructions", "prompts", "personas", "themes", "settings"])
         code, text = run_cli(["export", str(self.tmp / "only"), "--only=memory,archive", "--profile", "core"], self.src)
         self.assertEqual(code, 0, text)
         self.assertEqual(agentfile.inspect_agent(self.tmp / "only.omni-agent")["manifest"]["included"], ["memory", "archive"])
@@ -491,7 +493,7 @@ class AgentFileCase(unittest.TestCase):
         ok = str(self.tmp / "ok.omni-agent")
         for argv in ([], ["bogus"], ["import"], ["inspect"], ["inspect", "a", "b"], ["import", ok, "extra"], ["export", "a", "b"],
                      ["export", "--only", "nope"], ["export", "--without", "memory,nope"], ["export", "--frobnicate"],
-                     ["export", "--profile"], ["import", ok, "--only", "nope"], ["import", ok, "--profile", "core"],
+                     ["export", "--profile"], ["import", ok, "--only", "nope"], ["import", ok, "--profile"],
                      ["export", "--only", "memory", "--without", "memory"], ["inspect", ok, "--dry-run"]):
             code, text = run_cli(argv, self.src)
             self.assertEqual(code, 2, argv)
@@ -508,6 +510,121 @@ class AgentFileCase(unittest.TestCase):
             self.assertIn("omni agent", text)
         self.assertEqual(tree(self.dst), {})
         self.assertEqual(tree(self.src), {})
+
+
+
+GH_TOKEN = "ghp_" + "A" * 36
+
+
+class NewSectionsCase(unittest.TestCase):
+    # the fixtures of AgentFileCase, without running its tests a second time
+    setUp, _restore_env, use_profiles, sess, populate, export = (AgentFileCase.setUp, AgentFileCase._restore_env,
+                                                                AgentFileCase.use_profiles, AgentFileCase.sess,
+                                                                AgentFileCase.populate, AgentFileCase.export)
+
+    def populate_extra(self, agent: Path) -> None:
+        (agent / "AGENTS.md").write_text("Always run the tests.\n", encoding="utf-8")
+        (agent / "APPEND_SYSTEM.md").write_text("Be brief.\n", encoding="utf-8")
+        (agent / "prompts" / "review").mkdir(parents=True)
+        (agent / "prompts" / "fix.md").write_text("Fix $1\n", encoding="utf-8")
+        (agent / "prompts" / "review" / "deep.md").write_text("Review deeply\n", encoding="utf-8")
+        (agent / "personas").mkdir()
+        (agent / "personas" / "pirate.md").write_text("Talk like a pirate.\n", encoding="utf-8")
+        (agent / "themes").mkdir()
+        (agent / "themes" / "dusk.json").write_text(json.dumps({"name": "dusk", "colors": {"accent": "#123456"}}), encoding="utf-8")
+        (agent / "settings.json").write_text(json.dumps({
+            "theme": "dusk", "defaultThinkingLevel": "high", "fallbackModels": ["faux/faux-1"],
+            "retry": {"enabled": True, "apiKey": "x"}, "apiKey": "sk-should-not-travel",
+            "shellPath": "C:/bin/bash.exe", "defaultModel": "!cat ~/.secret"}), encoding="utf-8")
+        tok = agent / "skills" / "tokenizer"
+        tok.mkdir(parents=True)
+        (tok / "SKILL.md").write_text("---\nname: tokenizer\ndescription: \"Split text\"\n---\n\nSplit it.\n", encoding="utf-8")
+        leak = agent / "skills" / "leaky"
+        leak.mkdir()
+        (leak / "SKILL.md").write_text(f"---\nname: leaky\ndescription: \"x\"\n---\n\nUse {GH_TOKEN}\n", encoding="utf-8")
+
+    def test_new_sections_round_trip(self):
+        self.populate_extra(self.src)
+        summary = self.export()
+        sec = summary["sections"]
+        self.assertEqual((sec["instructions"]["count"], sec["prompts"]["count"], sec["personas"]["count"], sec["themes"]["count"]), (2, 2, 1, 1))
+        self.assertEqual(sorted(sec["settings"]["keys"]), ["defaultThinkingLevel", "fallbackModels", "retry", "theme"])
+        self.assertIn("apiKey", sec["settings"]["dropped"])
+        self.assertIn("defaultModel", sec["settings"]["dropped"])                  # a shell command is not a model name
+        blob = b"".join(zipfile.ZipFile(self.out).read(n) for n in zipfile.ZipFile(self.out).namelist())
+        for bad in (b"sk-should-not-travel", b"!cat", GH_TOKEN.encode()):
+            self.assertNotIn(bad, blob)
+        skipped = {x["item"]: x["reason"] for x in agentfile.inspect_agent(self.out)["manifest"]["skipped"]}
+        self.assertTrue(any("leaky" in k and "credential-like" in v for k, v in skipped.items()), skipped)
+        self.assertFalse(any(GH_TOKEN in v for v in skipped.values()))                 # the value is never recorded
+
+        self.use_profiles(self.dst_profiles)
+        agentfile.import_agent(self.dst, self.out)
+        self.assertEqual((self.dst / "AGENTS.md").read_text(encoding="utf-8"), "Always run the tests.\n")
+        self.assertEqual((self.dst / "prompts" / "review" / "deep.md").read_text(encoding="utf-8"), "Review deeply\n")
+        self.assertEqual((self.dst / "personas" / "pirate.md").read_text(encoding="utf-8"), "Talk like a pirate.\n")
+        self.assertEqual(json.loads((self.dst / "themes" / "dusk.json").read_text(encoding="utf-8"))["name"], "dusk")
+        self.assertTrue((self.dst / "skills" / "tokenizer" / "SKILL.md").is_file())     # a harmless name travels
+        self.assertFalse((self.dst / "skills" / "leaky").exists())
+        st = json.loads((self.dst / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual((st["theme"], st["retry"]), ("dusk", {"enabled": True}))
+        self.assertNotIn("apiKey", st)
+
+    def test_settings_merge_keeps_existing_keys(self):
+        self.populate_extra(self.src)
+        self.export()
+        (self.dst / "settings.json").write_text(json.dumps({"theme": "light", "mine": 1}), encoding="utf-8")
+        self.use_profiles(self.dst_profiles)
+        agentfile.import_agent(self.dst, self.out, sections=["settings", "instructions"])
+        st = json.loads((self.dst / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual((st["theme"], st["mine"], st["defaultThinkingLevel"]), ("light", 1, "high"))
+        (self.dst / "AGENTS.md").write_text("mine\n", encoding="utf-8")
+        agentfile.import_agent(self.dst, self.out, sections=["instructions"])
+        self.assertEqual((self.dst / "AGENTS.md").read_text(encoding="utf-8"), "mine\n")       # merge keeps it
+        agentfile.import_agent(self.dst, self.out, mode="replace", sections=["settings", "instructions"])
+        st = json.loads((self.dst / "settings.json").read_text(encoding="utf-8"))
+        self.assertEqual((st["theme"], st["mine"]), ("dusk", 1))                     # replace wins, unknown keys stay
+        self.assertEqual((self.dst / "AGENTS.md").read_text(encoding="utf-8"), "Always run the tests.\n")
+
+    def test_secret_names(self):
+        for name in ("api_token.txt", "TOKENS.md", "db-password", "my.key", "auth.json", ".env.local", "client_secret.json"):
+            self.assertTrue(agentfile.is_secret(name), name)
+        for name in ("tokenizer", "secretary.md", "SKILL.md", "deploy-staging", "passwordless-login"):
+            self.assertFalse(agentfile.is_secret(name), name)
+
+    def test_profile_memory_dir_and_path_mapping(self):
+        self.populate(self.src)
+        self.export()
+        custom = self.tmp / "elsewhere-memory"
+        self.use_profiles(self.dst_profiles)
+        result = agentfile.import_agent(self.dst, self.out, sections=["memory", "board", "cron"],
+                                        profile={"name": "x", "memory": {"dir": str(custom)}},
+                                        path_map=[f"{self.project}={self.tmp / 'moved'}"])
+        self.assertTrue((custom / "MEMORY.md").is_file())
+        self.assertFalse((self.dst / "memories" / "MEMORY.md").exists())
+        cards = json.loads(agentfile._json_bytes(agentfile._board_rows(self.sess(self.dst))).decode())
+        self.assertTrue(cards and all(c["project"] == str(self.tmp / "moved") for c in cards), cards)
+        self.assertIn("sections", result)
+        with self.assertRaises(agentfile.AgentFileError):
+            agentfile.import_agent(self.dst, self.out, path_map=["no-equals-sign"])
+
+    def test_unknown_sections_are_reported_not_fatal(self):
+        self.populate(self.src)
+        self.export(include=("memory",))
+        with zipfile.ZipFile(self.out) as z:
+            members = {n: z.read(n) for n in z.namelist()}
+        manifest = json.loads(members["manifest.json"])
+        manifest["included"].append("hologram")
+        members["manifest.json"] = json.dumps(manifest).encode()
+        members["hologram.json"] = b"{}"
+        newer = self.tmp / "newer.omni-agent"
+        with zipfile.ZipFile(newer, "w") as z:
+            for n, b in members.items():
+                z.writestr(n, b)
+        self.use_profiles(self.dst_profiles)
+        r = agentfile.import_agent(self.dst, newer)
+        self.assertGreater(r["sections"]["memory"]["added"], 0)
+        self.assertTrue(any(x["item"] == "hologram" and "unknown section" in x["reason"] for x in r["skipped"]))
 
 
 if __name__ == "__main__":

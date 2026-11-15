@@ -20,7 +20,16 @@ for _cap in lsp.CAPABILITIES:
     caps.register(_cap)
 
 FAKE_SERVER = r'''
-import json, re, sys
+import json, pathlib, re, sys
+
+# switches: --pull (pull diagnostics instead of publishing), --encoding=utf-32 (if the client offers it),
+#           --die=METHOD (write 25 lines to stderr and exit 3 when METHOD arrives)
+ARGS = sys.argv[1:]
+PULL = "--pull" in ARGS
+WANT = next((a.split("=", 1)[1] for a in ARGS if a.startswith("--encoding=")), None)
+DIE = next((a.split("=", 1)[1] for a in ARGS if a.startswith("--die=")), None)
+ENC = "utf-16"
+OUTSIDE = pathlib.Path(__file__).resolve().with_name("outside.txt").as_uri()
 
 inp, out = sys.stdin.buffer, sys.stdout.buffer
 docs = {}
@@ -46,39 +55,68 @@ def read():
     return json.loads(inp.read(length).decode("utf-8"))
 
 
-def rng(line, col, n):
-    return {"start": {"line": line, "character": col}, "end": {"line": line, "character": col + n}}
+def units(text, col):
+    return col if ENC == "utf-32" else len(text[:col].encode("utf-16-le")) // 2
+
+
+def chars(text, n):
+    if ENC == "utf-32":
+        return n
+    seen = 0
+    for i, ch in enumerate(text):
+        if seen >= n:
+            return i
+        seen += 2 if ord(ch) > 0xFFFF else 1
+    return len(text)
+
+
+def rows(uri):
+    return docs[uri]["text"].splitlines()
+
+
+def rng(uri, line, col, n):
+    text = rows(uri)[line] if line < len(rows(uri)) else ""
+    return {"start": {"line": line, "character": units(text, col)}, "end": {"line": line, "character": units(text, col + n)}}
 
 
 def word_at(uri, pos):
-    line = docs[uri]["text"].splitlines()[pos["line"]]
+    line = rows(uri)[pos["line"]]
+    col = chars(line, pos["character"])
     for m in re.finditer(r"\w+", line):
-        if m.start() <= pos["character"] <= m.end():
+        if m.start() <= col <= m.end():
             return m.group(0)
     return ""
 
 
 def occurrences(uri, word):
     found = []
-    for i, line in enumerate(docs[uri]["text"].splitlines()):
+    for i, line in enumerate(rows(uri)):
         for m in re.finditer(r"\b%s\b" % re.escape(word), line):
-            found.append(rng(i, m.start(), len(word)))
+            found.append(rng(uri, i, m.start(), len(word)))
     return found
 
 
 def declarations(uri):
-    for i, line in enumerate(docs[uri]["text"].splitlines()):
+    for i, line in enumerate(rows(uri)):
         m = re.match(r"(\s*)(def|class)\s+(\w+)", line)
         if m:
             yield i, m.start(3), m.group(2), m.group(3), bool(m.group(1))
 
 
-def publish(uri):
+def problems(uri):
     doc = docs[uri]
-    found = [{"range": rng(i, line.index("BUG"), 3), "severity": 1, "source": "fake", "code": "B1",
-              "message": "bug marker (v%d)" % doc["version"]}
-             for i, line in enumerate(doc["text"].splitlines()) if "BUG" in line]
-    send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": uri, "diagnostics": found}})
+    return [{"range": rng(uri, i, line.index("BUG"), 3), "severity": 1, "source": "fake-pull" if PULL else "fake", "code": "B1",
+             "message": "bug marker (v%d)" % doc["version"]}
+            for i, line in enumerate(rows(uri)) if "BUG" in line]
+
+
+def publish(uri):
+    if not PULL:
+        send({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": {"uri": uri, "diagnostics": problems(uri)}})
+
+
+def insert(uri, line, col, text):
+    return {"range": rng(uri, line, col, 0), "newText": text}
 
 
 while True:
@@ -88,17 +126,35 @@ while True:
     method, params, rid = msg.get("method"), msg.get("params") or {}, msg.get("id")
     uri = (params.get("textDocument") or {}).get("uri")
     result = None
+    if DIE and method == DIE:
+        for n in range(1, 26):
+            sys.stderr.write("fake: line %d\n" % n)
+        sys.stderr.flush()
+        sys.exit(3)
     if method == "initialize":
-        result = {"capabilities": {"textDocumentSync": 1, "definitionProvider": True}, "serverInfo": {"name": "fake"}}
+        client = params.get("capabilities") or {}
+        caps = {"textDocumentSync": 1, "definitionProvider": True, "codeActionProvider": {"resolveProvider": True},
+                "documentFormattingProvider": True}
+        if PULL and "diagnostic" in (client.get("textDocument") or {}):
+            caps["diagnosticProvider"] = {"interFileDependencies": False, "workspaceDiagnostics": False}
+        if WANT and WANT in ((client.get("general") or {}).get("positionEncodings") or []):
+            ENC = caps["positionEncoding"] = WANT
+        result = {"capabilities": caps, "serverInfo": {"name": "fake"}}
     elif method == "textDocument/didOpen":
         docs[uri] = {"text": params["textDocument"]["text"], "version": params["textDocument"]["version"]}
         publish(uri)
     elif method == "textDocument/didChange":
         docs[uri] = {"text": params["contentChanges"][0]["text"], "version": params["textDocument"]["version"]}
         publish(uri)
+    elif method == "textDocument/diagnostic":
+        state = "r%d" % docs[uri]["version"]
+        if params.get("previousResultId") == state:
+            result = {"kind": "unchanged", "resultId": state}
+        else:
+            result = {"kind": "full", "resultId": state, "items": problems(uri)}
     elif method == "textDocument/definition":
         word = word_at(uri, params["position"])
-        result = [{"uri": uri, "range": rng(i, col, len(name))} for i, col, _k, name, _n in declarations(uri) if name == word]
+        result = [{"uri": uri, "range": rng(uri, i, col, len(name))} for i, col, _k, name, _n in declarations(uri) if name == word]
     elif method == "textDocument/references":
         result = [{"uri": uri, "range": r} for r in occurrences(uri, word_at(uri, params["position"]))]
     elif method == "textDocument/hover":
@@ -108,14 +164,42 @@ while True:
     elif method == "textDocument/documentSymbol":
         result = []
         for i, col, kind, name, nested in declarations(uri):
-            sym = {"name": name, "kind": 5 if kind == "class" else 12, "range": rng(i, 0, 1), "selectionRange": rng(i, col, len(name)), "children": []}
+            sym = {"name": name, "kind": 5 if kind == "class" else 12, "range": rng(uri, i, 0, 1),
+                   "selectionRange": rng(uri, i, col, len(name)), "children": []}
             (result[-1]["children"] if nested and result else result).append(sym)
     elif method == "workspace/symbol":
-        result = [{"name": name, "kind": 5 if kind == "class" else 12, "location": {"uri": u, "range": rng(i, col, len(name))}}
+        result = [{"name": name, "kind": 5 if kind == "class" else 12, "location": {"uri": u, "range": rng(u, i, col, len(name))}}
                   for u in docs for i, col, kind, name, _n in declarations(u) if params["query"].lower() in name.lower()]
     elif method == "textDocument/rename":
         word = word_at(uri, params["position"])
         result = {"changes": {uri: [{"range": r, "newText": params["newName"]} for r in occurrences(uri, word)]}} if word else None
+    elif method == "textDocument/codeAction":
+        start, end = params["range"]["start"], params["range"]["end"]
+        ln = start["line"]
+        here = rows(uri)[ln]
+        sibling = uri.rsplit("/", 1)[0] + "/other.py"
+        result = [{"title": "Replace BUG marker", "kind": "quickfix", "isPreferred": True, "diagnostics": [d],
+                   "edit": {"changes": {uri: [{"range": d["range"], "newText": "FIXED"}]}}}
+                  for d in params["context"]["diagnostics"]]
+        result += [
+            {"title": "Add header", "kind": "refactor", "edit": {"documentChanges": [
+                {"textDocument": {"uri": uri, "version": docs[uri]["version"]},
+                 "edits": [insert(uri, 0, 0, "# one\n"), insert(uri, 0, 0, "# two\n"), insert(uri, ln, len(here), "  # seen")]}]}},
+            {"title": "Run organizer", "command": "fake.organize", "arguments": [uri]},
+            {"title": "Touch outside", "kind": "quickfix", "edit": {"changes": {OUTSIDE: [insert(uri, 0, 0, "x")]}}},
+            {"title": "Lazy fix", "kind": "quickfix", "data": {"uri": uri, "line": ln}},
+            {"title": "Two files", "kind": "refactor", "edit": {"changes": {uri: [insert(uri, 0, 0, "# a\n")],
+                                                                            sibling: [insert(uri, 0, 0, "# b\n")]}}},
+            {"title": "Inline it", "kind": "refactor.inline", "disabled": {"reason": "not here"}}]
+        if start == end:
+            result.append({"title": "Cursor at %d" % start["character"], "command": "fake.cursor"})
+    elif method == "codeAction/resolve":
+        data = params["data"]
+        result = dict(params, edit={"changes": {data["uri"]: [insert(data["uri"], data["line"], 0, "# resolved\n")]}})
+    elif method == "textDocument/formatting":
+        result = [{"range": {"start": {"line": i, "character": units(line, len(line.rstrip()))},
+                             "end": {"line": i, "character": units(line, len(line))}}, "newText": ""}
+                  for i, line in enumerate(rows(uri)) if line != line.rstrip()]
     elif method == "exit":
         break
     if rid is not None and method is not None:
@@ -295,6 +379,99 @@ class TestLsp(CapCase):
         r = self.lsp(s, "symbols", path="pkg/main.py")
         self.assertFalse(r.get("isError"), self.text(r))
         self.assertIsNot(s._lsp["py"], first)
+
+
+    # ------------------------------------------------------------------------------- writing, encodings, diagnostics
+    def start_with(self, *flags, **extra):
+        cfg = {"py": [sys.executable, str(self.fake), *flags]}
+        (self.profiles / "r15.json").write_text(json.dumps({"name": "r15", "extends": "lean", "capabilities": ["lsp"], "lsp": cfg, **extra}))
+        s = self.session(profile="r15", cwd=str(self.work))
+        self.addCleanup(lsp._unload, s)
+        return s
+
+    def test_pull_diagnostics(self):
+        s = self.start_with("--pull")
+        r = self.lsp(s, "diagnostics", path="pkg/main.py")
+        self.assertIn("fake-pull", self.text(r))
+        self.assertIn("bug marker (v1)", self.text(r))
+        self.assertTrue(s._lsp["py"].capabilities.get("diagnosticProvider"))
+        again = self.text(self.lsp(s, "diagnostics", path="pkg/main.py"))          # "unchanged": the cached report holds
+        self.assertIn("bug marker (v1)", again)
+        self.src.write_text(SOURCE.replace("# BUG", "# BUG BUG"), encoding="utf-8")
+        self.assertIn("bug marker (v2)", self.text(self.lsp(s, "diagnostics", path="pkg/main.py")))
+
+    def test_columns_on_a_line_with_emoji(self):
+        line = 's = "\U0001F600\U0001F600"; target = 1\n'
+        (self.work / "pkg" / "emoji.py").write_text(line, encoding="utf-8")
+        col = line.index("target")                                                 # 0-based characters
+        s = self.start()                                                           # the server counts UTF-16 units
+        hover = self.text(self.lsp(s, "hover", path="pkg/emoji.py", line=1, symbol="target"))
+        self.assertIn(f"hover: target @ 0:{col + 2}", hover)                       # two emoji = two extra units
+        self.assertTrue(hover.startswith(f"pkg/emoji.py:1:{col + 1}"), hover)       # shown back in characters
+        refs = self.text(self.lsp(s, "references", path="pkg/emoji.py", line=1, symbol="target"))
+        self.assertIn(f"pkg/emoji.py:1:{col + 1}", refs)
+        s32 = self.start_with("--encoding=utf-32")
+        self.assertIn(f"hover: target @ 0:{col}", self.text(self.lsp(s32, "hover", path="pkg/emoji.py", line=1, symbol="target")))
+        self.assertEqual(s32._lsp["py"].encoding, "utf-32")
+
+    def test_code_actions_list_and_apply(self):
+        s = self.start()
+        listing = self.text(self.lsp(s, "code_actions", path="pkg/main.py", line=8))
+        for n, title in ((1, "Replace BUG marker"), (2, "Add header"), (3, "Run organizer"), (4, "Touch outside"),
+                         (5, "Lazy fix"), (6, "Two files"), (7, "Inline it")):
+            self.assertIn(f"{n}. {title}", listing)
+        self.assertIn("command only: cannot be applied", listing)
+        self.assertIn("disabled: not here", listing)
+
+        for index, why in ((3, "command only"), (7, "disabled"), (4, "outside the project")):   # refusals write nothing
+            r = self.lsp(s, "apply_action", path="pkg/main.py", line=8, index=index)
+            self.assertTrue(r.get("isError"), index)
+            self.assertIn(why, self.text(r))
+        self.assertEqual(self.src.read_text(encoding="utf-8"), SOURCE)
+        self.assertFalse((self.fake.with_name("outside.txt")).exists())
+        self.assertIn("between 1 and", self.text(self.lsp(s, "apply_action", path="pkg/main.py", line=8, index=99)))
+
+        r = self.lsp(s, "apply_action", path="pkg/main.py", line=8, index=1)
+        self.assertFalse(r.get("isError"), self.text(r))
+        self.assertIn('x = greet("a")  # FIXED', self.src.read_text(encoding="utf-8"))
+        # line 1 has no diagnostics, so its list starts at "Add header": 1 Add header ... 4 Lazy fix
+        self.assertIn("4. Lazy fix", self.text(self.lsp(s, "code_actions", path="pkg/main.py", line=1)))
+        self.lsp(s, "apply_action", path="pkg/main.py", line=1, index=4)          # resolved by the server on request
+        self.assertTrue(self.src.read_text(encoding="utf-8").startswith("# resolved\n"))
+        self.lsp(s, "apply_action", path="pkg/main.py", line=1, index=1)          # documentChanges, two inserts at one spot
+        after = self.src.read_text(encoding="utf-8")
+        self.assertTrue(after.startswith("# one\n# two\n# resolved"), after[:40])
+        self.assertEqual(after.count("# seen"), 1)
+
+    def test_rename_apply_format_and_the_gate(self):
+        s = self.start()
+        r = self.lsp(s, "rename", path="pkg/main.py", line=1, symbol="greet", new_name="welcome", apply=True)
+        self.assertFalse(r.get("isError"), self.text(r))
+        text = self.src.read_text(encoding="utf-8")
+        self.assertEqual((text.count("welcome"), text.count("greet")), (3, 0))
+
+        messy = self.work / "pkg" / "messy.py"
+        messy.write_text("a = 1   \nb = 2\t\nc = 3\n", encoding="utf-8")
+        r = self.lsp(s, "format", path="pkg/messy.py")
+        self.assertIn("Formatted pkg/messy.py", self.text(r))
+        self.assertEqual(messy.read_text(encoding="utf-8"), "a = 1\nb = 2\nc = 3\n")
+        self.assertIn("already formatted", self.text(self.lsp(s, "format", path="pkg/messy.py")))
+
+        messy.write_text("a = 1   \n", encoding="utf-8")
+        with mock.patch.object(s.caps, "gate", return_value="plan mode is on: no edits until the plan is approved"):
+            r = self.lsp(s, "format", path="pkg/messy.py")
+        self.assertTrue(r.get("isError"))
+        self.assertIn("plan mode is on", self.text(r))
+        self.assertEqual(messy.read_text(encoding="utf-8"), "a = 1   \n")          # nothing written
+
+    def test_a_dying_server_shows_its_last_output(self):
+        s = self.start_with("--die=textDocument/hover")
+        r = self.lsp(s, "hover", path="pkg/main.py", line=1, symbol="greet")
+        self.assertTrue(r.get("isError"))
+        status = s.caps.commands()["lsp"][1]("")
+        self.assertIn("Died (restarted on next use)", status)
+        self.assertIn("fake: line 25", status)
+        self.assertNotIn("fake: line 5\n", status)                                 # only the last lines are kept
 
 
 if __name__ == "__main__":
