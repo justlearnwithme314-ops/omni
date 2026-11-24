@@ -16,7 +16,8 @@ Channel plugins: every `<agent-dir>/channels/*.py` is imported when the gateway 
 `register_channel("name", factory)` (passed into its namespace) or defines `CHANNELS = {"name": factory}`, where
 `factory(cfg)` returns an object with `poll(timeout) -> [Inbound]`, `send(chat, text)` and optionally `typing(chat)`
 and `close()`. `Channel` and `Inbound` are in its namespace too. This is the slot for what Hermes calls platform
-plugins and OpenClaw calls channel plugins; their own adapter classes are not loaded as they are.
+plugins and OpenClaw calls channel plugins. Hermes platform plugins themselves also load unchanged, as channel
+type `hermes:<name>` (see hermes_platforms.py).
 """
 from __future__ import annotations
 
@@ -166,9 +167,7 @@ def load_plugins(gw: Any, agent_dir: Any) -> List[str]:
     """Import <agent-dir>/channels/*.py. Returns problems (one line each)."""
     problems: List[str] = []
     folder = Path(agent_dir) / "channels"
-    if not folder.is_dir():
-        return problems
-    for path in sorted(folder.glob("*.py")):
+    for path in sorted(folder.glob("*.py")) if folder.is_dir() else []:   # (edited for Hermes platforms: no early return)
         if path.name.startswith("_"):
             continue
         ns: Dict[str, Any] = {"__name__": f"omni_channel_{path.stem}", "__file__": str(path), "register_channel": gw.register_channel,
@@ -181,4 +180,11 @@ def load_plugins(gw: Any, agent_dir: Any) -> List[str]:
                     gw.register_channel(str(name), factory)
         except Exception as e:
             problems.append(f"channel plugin {path.name}: {type(e).__name__}: {e}")
+    # --- Hermes platform plugins as `hermes:<name>` channel types (see hermes_platforms.py) -------------------
+    try:
+        from . import hermes_platforms
+        problems += hermes_platforms.install(gw, agent_dir)
+    except Exception as e:
+        problems.append(f"hermes platform plugins: {type(e).__name__}: {e}")
+    # --- end Hermes platform plugins ------------------------------------------------------------------------------
     return problems

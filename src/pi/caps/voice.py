@@ -25,6 +25,20 @@ Profile settings (all optional): `"voice": {"tts": "openai", "stt": "openai", "v
 that is set up is used. `OMNI_OPENAI_AUDIO_BASE` points the OpenAI calls at another server (a proxy or a compatible
 service). `/voices` lists the providers and whether each can be used.
 
+Push-to-talk (talk to the agent instead of typing): in the terminal window press alt+v to start recording, speak,
+press alt+v again. The recording is transcribed with the transcription provider above and the words are put at the
+cursor in the editor - nothing is sent until you press Enter. Escape while recording throws the recording away.
+The key is the `app.voice.toggle` action in keybindings.json, so it can be moved. `/dictate [seconds]` records for a
+fixed time instead (default 10 s) and puts the transcript in the editor. A recording stops by itself after 120 s.
+
+Recording needs a recorder program, because Python alone cannot use the microphone. The first one found is used:
+ffmpeg (Windows: the first DirectShow microphone; macOS: the default input; Linux: PulseAudio, else ALSA), then
+SoX (`rec` / `sox`), then `arecord` (Linux). Install ffmpeg if you have none (Windows: `winget install ffmpeg`,
+macOS: `brew install ffmpeg`). To use another program or microphone, give the command in the profile, with `{out}`
+where the .wav file to write goes: `"voice": {"record_command": ["ffmpeg", "-f", "dshow", "-i", "audio=My Mic",
+"{out}"]}`. `"language": "en"` there is passed to the transcription as a hint. Recordings are temporary files that
+are deleted after transcription.
+
 Adding a provider (this is the slot a Hermes or OpenClaw TTS / transcription plugin is plugged into):
 
     from src.pi.caps import voice
@@ -311,6 +325,47 @@ def pick_stt(session: Any) -> SttProvider:
     return _pick(STT_PROVIDERS, session, "stt", "transcription")
 
 
+# --- push-to-talk support (round 20): used by src/pi/voice_input.py ------------------------------------------
+def stt_problem(session: Any) -> Optional[str]:
+    """Why voice input cannot be used in this session right now, or None when it can."""
+    caps_view = getattr(session, "caps", None)
+    if caps_view is None or not caps_view.is_enabled("voice"):
+        return "Voice input needs the `voice` capability: turn it on with /capabilities voice on"
+    try:
+        pick_stt(session)
+    except ToolError as e:
+        return str(e)
+    return None
+
+
+def transcribe_audio(session: Any, path: Path, language: str = "") -> Tuple[str, str]:
+    """Transcribe an audio file anywhere on disk (e.g. a temporary recording). Returns (text, provider name)."""
+    try:
+        size = Path(path).stat().st_size
+    except OSError as e:
+        raise ToolError(f"could not read {Path(path).name}: {e}") from None
+    if size > MAX_BYTES:
+        raise ToolError(f"the recording is {size / 1048576:.1f} MB; transcription takes at most 25 MB. Record less.")
+    if size == 0:
+        raise ToolError("the recording is empty")
+    provider = pick_stt(session)
+    try:
+        result = provider.transcribe(Path(path), language, session)
+    except ToolError:
+        raise
+    except Exception as e:
+        raise ToolError(f"transcription provider '{provider.name}' failed: {type(e).__name__}: {e}") from None
+    if isinstance(result, dict):
+        result = result.get("text")
+    return str(result or "").strip(), provider.name
+
+
+def _dictate(session: Any, args: str) -> str:
+    from ..voice_input import dictate   # imported late: voice_input imports this module
+    return dictate(session, args)
+# --- end push-to-talk support ------------------------------------------------------------------------------
+
+
 def _listing(providers: Dict[str, Any], session: Any, key: str) -> str:
     chosen = str(_config(session).get(key) or "").strip().lower()
     return "\n".join(f"  {p.name}  {'available' if p.is_available(session) else 'not set up'}"
@@ -525,5 +580,8 @@ CAPABILITIES = [
     Capability("voice", "Voice", "Read text aloud into an audio file and transcribe audio files to text.",
                "Hermes / OpenClaw TTS and transcription", tools=_tools,
                commands=lambda s: {"voices": ("List speech and transcription providers and whether each is set up",
-                                              lambda a: providers_text(s))}),
+                                              lambda a: providers_text(s)),
+                                   # round 20: push-to-talk without the key
+                                   "dictate": ("Record from the microphone for N seconds (default 10) and put the "
+                                               "transcript in the editor", lambda a: _dictate(s, a))}),
 ]

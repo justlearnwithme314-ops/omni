@@ -44,6 +44,7 @@ ACTIONS: Dict[str, Tuple[str, List[str]]] = {
     "app.message.copy": ("ctrl+x", ["ctrl+x"]),
     "app.message.followUp": ("alt+enter", ["alt+enter"]),
     "app.message.dequeue": ("alt+up", ["alt+up"]),
+    "app.voice.toggle": ("alt+v", ["alt+v"]),          # Omni extra (round 20): push-to-talk voice input
     "app.session.new": ("/new", []),
     "app.session.tree": ("/tree", []),
     "app.session.fork": ("/fork", []),
