@@ -253,6 +253,9 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
   answers side by side. `"consensus": {"models": ["provider/id", ...]}`. One request per model.
 - **`voice`** (Hermes, OpenClaw): `speak` (text to speech: OpenAI, or the operating system's own voice offline) and
   `transcribe` (speech to text, OpenAI). `/voices` lists providers.
+  Push to talk in the terminal: `alt+v` starts and stops recording (Escape cancels) and the transcript lands in the
+  message box for you to review; `/dictate [seconds]` does the same for a fixed time. Recording needs ffmpeg, sox or
+  arecord on PATH, or `"voice": {"record_command": [..., "{out}"]}` in the profile.
 - **`persona`** (Hermes, OpenClaw): `/persona [name|off]` switches the agent's voice and working style: `concise`,
   `teacher`, `reviewer`, `pair`, or your own in `<agent-dir>/personas/<name>.md`. `"persona": "name"` in a profile
   sets a default. Costs nothing while off.
@@ -263,7 +266,8 @@ The gateway also has a send-only **webhook** channel (`{"type": "webhook", "url"
 Outside the capability system:
 - **Web interface** (Hermes dashboard, OpenClaw control UI): `omni web` opens the agent in a browser tab on this
   machine: streamed answers, folded tool calls, slash commands, pickers and confirmations as dialogs. The address
-  carries a random access key; one page, no external resources.
+  carries a random access key; one page, no external resources. The header lists this folder's sessions (switch or
+  start a new one) and the models you are signed in to; images can be pasted or dropped into the message box.
 - **Batch runs** (Hermes batch runner): `omni batch prompts.jsonl [--parallel N] [--resume]` answers many prompts
   without a window, one fresh session each, and writes one result line per prompt.
 - **`omni update`**: fast-forwards the git checkout Omni runs from; refuses with local changes.
@@ -289,7 +293,9 @@ Outside the capability system:
 - **`keybindings.json`** (Pi): `<agent-dir>/keybindings.json` reassigns keys using Pi's action names
   (`"app.model.select": "ctrl+k"`), plus `"/command": "key"`. `/hotkeys` shows the result.
 - **Gateway channels**: `slack` and `discord` (polling the HTTP APIs, no extra library) next to telegram, http and
-  webhook; any `<agent-dir>/channels/*.py` can add a channel type (the slot for Hermes platform / OpenClaw channel
+  webhook; Hermes platform plugins run unmodified as `"type": "hermes:<name>"` channels through a stand-in for
+  Hermes' `gateway` package (text only; ntfy, IRC, Mattermost, SMS and LINE should load, adapters that import more of
+  Hermes report what they miss); any `<agent-dir>/channels/*.py` can add a channel type (the slot for Hermes platform / OpenClaw channel
   plugins, whose own adapter classes are not loaded as they are).
 - `/diff [staged|all]` (with `workflows`) shows the working-tree changes. `"browser": {"allowed_domains": ["*.example.com"]}` limits where the browser may go.
 

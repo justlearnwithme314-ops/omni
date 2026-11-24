@@ -401,3 +401,11 @@ renames; the agent file gained instructions, prompts, personas, themes and setti
 
 Still open: running OpenClaw provider / channel plugin code and Hermes platform adapters as they are; push to
 talk; image attachments and session switching in the web interface.
+
+## Update 2026-11-24 (round L)
+
+Merged: Hermes platform plugins as gateway channels (`hermes:<name>`), push to talk (`alt+v`, `/dictate`), web
+interface session list, model picker and image attachments.
+
+Still open: OpenClaw provider / channel plugin *code* (only manifests are used); Hermes adapters that need more of
+Hermes than its gateway basics; media, reactions and threads on gateway channels.

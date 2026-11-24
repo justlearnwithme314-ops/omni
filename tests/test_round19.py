@@ -113,6 +113,51 @@ class TestWeb(WebCase):
         self.server.app.hub.leave(q)
         self.assertIs(s.ui.confirm("Sure?", "really"), False)                          # nobody is looking: the safe answer
 
+    def test_images_sessions_and_models(self):
+        import base64
+        s = self.start()
+        png = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 40).decode()
+        q = self.events()
+        Faux.queue = [{"text": "I see a picture."}]
+        r = self.req("/api/prompt", {"text": "what is this?", "images": [{"mimeType": "image/png", "data": png}]})
+        self.assertEqual(r[1]["kind"], "prompt")
+        self.drain(q, "done")
+        sent = Faux.requests[-1]["messages"][-1]["content"]
+        self.assertEqual([b["type"] for b in sent], ["text", "image"])
+        self.assertEqual(self.req("/api/state")[1]["history"][0]["images"], 1)
+        bad = [{"mimeType": "image/svg+xml", "data": png}], [{"mimeType": "image/png", "data": "@@not base64@@"}], \
+            [{"mimeType": "image/png", "data": png}] * 7
+        for images in bad:
+            self.assertEqual(self.req("/api/prompt", {"text": "x", "images": images})[0], 400)
+        self.assertEqual(self.req("/api/prompt", {"text": "/session", "images": [{"mimeType": "image/png", "data": png}]})[0], 400)
+
+        first = str(s.sessions.file)
+        listed = self.req("/api/sessions")[1]["sessions"]
+        self.assertEqual([(x["path"], x["current"]) for x in listed], [(first, True)])
+        self.assertEqual(self.req("/api/session", {"action": "new"})[1], {"ok": True})
+        Faux.queue = [{"text": "fresh"}]
+        self.req("/api/prompt", {"text": "second conversation"})
+        self.drain(q, "done")
+        self.assertNotEqual(str(s.sessions.file), first)
+        self.assertEqual(self.req("/api/session", {"action": "resume", "path": first})[1], {"ok": True})
+        self.assertEqual(str(s.sessions.file), first)
+        self.assertEqual(self.req("/api/state")[1]["history"][0]["text"], "what is this?")
+        self.assertEqual(self.req("/api/session", {"action": "resume", "path": str(self.dir / "elsewhere.jsonl")})[0], 400)
+        self.assertEqual(self.req("/api/session", {"action": "delete"})[0], 400)
+
+        models = self.req("/api/models")[1]
+        self.assertEqual(models["current"], "faux/faux-1")
+        self.assertIn("faux/faux-1", [m["key"] for m in models["models"]])
+        self.assertTrue(all(m["provider"] == "faux" or s.auth.get_api_key(m["provider"]) for m in models["models"]))
+        self.assertEqual(self.req("/api/model", {"key": "nope/none"})[0], 400)
+        self.assertEqual(self.req("/api/model", {"key": "faux/faux-1"})[1], {"ok": True})
+
+    def test_page_has_the_new_controls(self):
+        self.start()
+        page = self.req("/")[1]
+        for needle in ('id="pickSession"', 'id="pickModel"', 'id="pics"', "addEventListener('paste'", "addEventListener('drop'"):
+            self.assertIn(needle, page)
+
     def test_translate(self):
         self.assertEqual(web.translate({"type": "message_update", "assistantMessageEvent": {"type": "thinking_delta", "delta": "hm"}}),
                          {"type": "thinking", "text": "hm"})

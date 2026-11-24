@@ -178,6 +178,8 @@ class InteractiveApp:
         else:
             err = None
         finally:
+            if getattr(self, "_voice", None) is not None:   # round 20: never leave a recorder running
+                self._voice.shutdown()
             self.term.leave()
             s.shutdown("quit")
         if err:
@@ -760,6 +762,8 @@ class InteractiveApp:
                 return
             elif hit is not None:
                 n = hit
+        if n == "escape" and getattr(self, "_voice", None) is not None and self._voice.cancel():
+            return                                       # round 20: escape cancels a push-to-talk recording
         ext_sc = getattr(s.ext, "shortcuts", {})
         if n in ext_sc:
             self.in_worker(lambda: s.ext.run_shortcut(n))
@@ -871,11 +875,38 @@ class InteractiveApp:
                 ed.set_text("\n\n".join(items + ([ed.text] if ed.text else [])))
         elif n == "ctrl+g":
             self.external_editor()
+        elif n == "alt+v":                               # round 20: push-to-talk (app.voice.toggle)
+            self.voice_controller().toggle()
+            return
         elif len(n) == 1 or (k.text and not n.startswith(("ctrl+", "alt+"))):
             ed.insert(k.text or n)
         else:
             return
         self.update_completions()
+
+    # --- round 20: push-to-talk voice input (logic in src/pi/voice_input.py) ---
+    def voice_controller(self) -> Any:
+        vc = getattr(self, "_voice", None)
+        if vc is None:
+            from ..voice_input import VoiceController
+
+            def set_status(text: Optional[str]) -> None:
+                if text:
+                    self.statuses["voice"] = text
+                else:
+                    self.statuses.pop("voice", None)
+                self.dirty = True
+
+            def key_label() -> str:
+                from .keybindings import ACTIONS
+                keys = self.keymap().bindings.get("app.voice.toggle", ACTIONS["app.voice.toggle"][1])
+                return keys[0] if keys else "alt+v"
+
+            vc = self._voice = VoiceController(self.session, insert=lambda t: self.editor.insert(t), notify=self.notify,
+                                               set_status=set_status, worker=self.in_worker, post=self.post,
+                                               key_label=key_label)
+        return vc
+    # --- end push-to-talk ---
 
     def _cycle_model(self, d: int) -> None:
         m = self.session.cycle_model(d)

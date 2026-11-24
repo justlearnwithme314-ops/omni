@@ -5,7 +5,9 @@
 Starts a small web server on this machine only (127.0.0.1) and opens a chat page: streamed answers, tool calls
 with their results folded away, slash commands (`/model`, `/capabilities`, `/board` ... type `/` for the list),
 pickers and confirmations as dialogs, an interrupt button, and the same sessions, profiles, memory and tools as the
-terminal. The page address carries a random access key; without it every request is refused, so other programs
+terminal. The header has a session list (switch to an earlier conversation of this folder, or start a new one) and
+a model picker listing the models you are signed in to. Images can be pasted or dropped into the message box
+(at most 6 per message, 8 MB each) for models that accept them. The page address carries a random access key; without it every request is refused, so other programs
 and other users of the machine cannot drive your agent. It is one page with no external scripts or fonts.
 
 It is meant for one person on their own machine. To reach it from elsewhere, forward the port through SSH or a
@@ -23,7 +25,9 @@ import webbrowser
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-MAX_BODY = 2_000_000
+MAX_BODY = 60_000_000          # room for a few images
+MAX_IMAGES, MAX_IMAGE_BYTES = 6, 8_000_000
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/gif", "image/webp")
 ASK_TIMEOUT = 300.0
 
 
@@ -167,6 +171,28 @@ class WebUI:
         return lambda *a, **k: None
 
 
+def clean_images(images: Any) -> List[Dict[str, Any]]:
+    """Images from the page as the session takes them; raises ValueError with a message for the user."""
+    import base64
+    import binascii
+    if not images:
+        return []
+    if not isinstance(images, list) or len(images) > MAX_IMAGES:
+        raise ValueError(f"at most {MAX_IMAGES} images per message")
+    out = []
+    for img in images:
+        if not isinstance(img, dict) or img.get("mimeType") not in IMAGE_TYPES or not isinstance(img.get("data"), str):
+            raise ValueError("images must be PNG, JPEG, GIF or WebP")
+        try:
+            size = len(base64.b64decode(img["data"], validate=True))
+        except (binascii.Error, ValueError):
+            raise ValueError("an image could not be read") from None
+        if size > MAX_IMAGE_BYTES:
+            raise ValueError(f"an image is larger than {MAX_IMAGE_BYTES // 1_000_000} MB")
+        out.append({"type": "image", "data": img["data"], "mimeType": img["mimeType"]})
+    return out
+
+
 def history(session: Any) -> List[Dict[str, Any]]:
     """The current branch as the page shows it."""
     rows: List[Dict[str, Any]] = []
@@ -176,7 +202,9 @@ def history(session: Any) -> List[Dict[str, Any]]:
         m = e["message"]
         role = m.get("role")
         if role == "user":
-            rows.append({"type": "user", "text": _text(m.get("content"))})
+            c = m.get("content")
+            pics = sum(1 for b in c if isinstance(b, dict) and b.get("type") == "image") if isinstance(c, list) else 0
+            rows.append({"type": "user", "text": _text(c), "images": pics})
         elif role == "assistant":
             text = _text(m.get("content"))
             if text:
@@ -243,11 +271,19 @@ class WebApp:
         if out is not None:
             self.hub.publish(out)
 
-    def submit(self, text: str) -> Dict[str, Any]:
+    def submit(self, text: str, images: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         text = text.strip()
-        if not text:
+        try:
+            images = clean_images(images)
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+        if not text and not images:
             return {"ok": False, "error": "empty message"}
         s = self.session
+        if images and (text.startswith("/") or s.is_streaming):
+            return {"ok": False, "error": "images can only be sent with a new message, not with a command or while the agent works"}
+        if images and s.model and "image" not in (s.model.get("input") or ["text"]):
+            return {"ok": False, "error": f"{s.model.get('id')} does not accept images; pick another model"}
         if text.startswith("/"):
             name, _, args = text[1:].partition(" ")
 
@@ -264,18 +300,71 @@ class WebApp:
             s.steer(text)
             self.hub.publish({"type": "user", "text": text, "steer": True})
             return {"ok": True, "kind": "steer"}
-        threading.Thread(target=self._prompt, args=(text,), daemon=True, name="omni-web-prompt").start()
+        threading.Thread(target=self._prompt, args=(text, images), daemon=True, name="omni-web-prompt").start()
         return {"ok": True, "kind": "prompt"}
 
-    def _prompt(self, text: str) -> None:
+    def _prompt(self, text: str, images: Optional[List[Dict[str, Any]]] = None) -> None:
         with self.worker_lock:
-            self.hub.publish({"type": "user", "text": text})
+            self.hub.publish({"type": "user", "text": text, "images": len(images or [])})
             try:
-                self.session.prompt(text)
+                self.session.prompt(text, images=images or None)
             except Exception as e:
                 self.hub.publish({"type": "notice", "level": "error", "message": f"{type(e).__name__}: {e}"})
             self.hub.publish({"type": "done"})
             self.hub.publish({"type": "state"})
+
+    def sessions(self) -> List[Dict[str, Any]]:
+        from .session import SessionManager
+        current = str(self.session.sessions.file or "")
+        rows = SessionManager.list_sessions(self.session.sessions.session_dir)[:100]
+        return [{"path": r["path"], "name": r.get("name") or "", "first": r.get("firstMessage") or "", "messages": r.get("messageCount", 0),
+                 "mtime": r.get("mtime"), "current": r["path"] == current}
+                for r in rows if r.get("messageCount") or r["path"] == current]     # skip conversations that never started
+
+    def switch_session(self, action: str, path: str = "") -> Dict[str, Any]:
+        s = self.session
+        deadline = time.time() + 3                 # "done" reaches the page a moment before the turn has settled
+        while s.is_streaming and time.time() < deadline:
+            time.sleep(0.05)
+        if s.is_streaming:
+            return {"ok": False, "error": "the agent is working; stop it first"}
+        if action == "new":
+            ok = s.new_session()
+        elif action == "resume":
+            known = {r["path"] for r in self.sessions()}
+            if path not in known:                  # only this folder's own sessions, never an arbitrary file
+                return {"ok": False, "error": "no such session in this folder"}
+            ok = s.resume(path)
+        else:
+            return {"ok": False, "error": "action must be new or resume"}
+        if ok:
+            self.hub.publish({"type": "reset"})
+        return {"ok": bool(ok)}
+
+    def models(self) -> Dict[str, Any]:
+        from .ai import model_key
+        s, signed = self.session, {}
+        rows = []
+        for m in s.registry.all():
+            prov = m["provider"]
+            if prov not in signed:
+                try:
+                    signed[prov] = bool(s.auth.get_api_key(prov))
+                except Exception:
+                    signed[prov] = False
+            if signed[prov]:
+                rows.append({"key": model_key(m), "name": m.get("name") or m["id"], "provider": prov,
+                             "images": "image" in (m.get("input") or ["text"]), "reasoning": bool(m.get("reasoning"))})
+        return {"current": model_key(s.model) if s.model else "", "models": rows}
+
+    def choose_model(self, key: str) -> Dict[str, Any]:
+        provider, _, mid = str(key).partition("/")
+        m = self.session.registry.find(provider, mid)
+        if m is None or not self.session.auth.get_api_key(provider):
+            return {"ok": False, "error": f"unknown model, or not signed in: {key}"}
+        self.session.set_model(m)
+        self.hub.publish({"type": "state"})
+        return {"ok": True}
 
     def command_list(self) -> List[Dict[str, str]]:
         try:
@@ -323,6 +412,10 @@ def make_handler(app: WebApp) -> type:
                 return self._json(200, {**state(app.session), "history": history(app.session), "commands": app.command_list()})
             if u.path == "/api/events":
                 return self._events()
+            if u.path == "/api/sessions":
+                return self._json(200, {"sessions": app.sessions()})
+            if u.path == "/api/models":
+                return self._json(200, app.models())
             self._json(404, {"error": "not found"})
 
         def _events(self) -> None:
@@ -365,7 +458,13 @@ def make_handler(app: WebApp) -> type:
             except (ValueError, UnicodeDecodeError) as e:
                 return self._json(400, {"error": f"bad JSON: {e}"})
             if u.path == "/api/prompt":
-                r = app.submit(str(data.get("text") or ""))
+                r = app.submit(str(data.get("text") or ""), data.get("images"))
+                return self._json(200 if r["ok"] else 400, r)
+            if u.path == "/api/session":
+                r = app.switch_session(str(data.get("action") or ""), str(data.get("path") or ""))
+                return self._json(200 if r["ok"] else 400, r)
+            if u.path == "/api/model":
+                r = app.choose_model(str(data.get("key") or ""))
                 return self._json(200 if r["ok"] else 400, r)
             if u.path == "/api/abort":
                 app.session.abort()
@@ -483,12 +582,20 @@ textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offs
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:min(560px,92vw);padding:18px}
 dialog::backdrop{background:rgba(0,0,0,.4)}dialog h3{margin:0 0 10px;font-size:16px}dialog p{white-space:pre-wrap;color:var(--dim);margin:0 0 12px;max-height:40vh;overflow:auto}
 dialog .opts{display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto}dialog .opts button{text-align:left}
+.hb{padding:4px 10px;font-size:13px;border-radius:8px}.hb span{color:var(--dim)}
+#pics{display:none;gap:6px;position:absolute;bottom:100%;left:0;margin-bottom:6px}#pics.on{display:flex}
+#pics img{height:56px;border-radius:6px;border:1px solid var(--line);cursor:pointer}
+main.drop{outline:2px dashed var(--accent);outline-offset:-8px}
+.list{display:flex;flex-direction:column;gap:4px;max-height:60vh;overflow:auto}.list button{text-align:left;display:flex;flex-direction:column;gap:2px}
+.list button small{color:var(--dim)}.list button.cur{border-color:var(--accent)}
+dialog input.filter{margin-bottom:8px}
 dialog .row{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}dialog input{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
 </style></head><body>
-<header><b>Omni</b><span id="model"></span><span id="cwd"></span><span id="bar"></span><span id="ctx"></span></header>
+<header><b>Omni</b><button type="button" class="hb" id="pickModel" title="Choose model"><span id="model"></span></button>
+<span id="cwd"></span><span id="bar"></span><span id="ctx"></span><button type="button" class="hb" id="pickSession">Sessions</button></header>
 <main id="main"><div id="log" aria-live="polite"></div></main>
 <footer><form id="form"><div id="hints" role="listbox"></div>
-<textarea id="box" rows="1" placeholder="Message Omni   ·   / for commands   ·   Enter to send, Shift+Enter for a new line" aria-label="Message"></textarea>
+<div id="pics"></div><textarea id="box" rows="1" placeholder="Message Omni   ·   / for commands   ·   Enter to send, Shift+Enter for a new line" aria-label="Message"></textarea>
 <button type="button" id="stop" hidden>Stop</button><button class="primary" id="send">Send</button></form></footer>
 <dialog id="dlg"></dialog>
 <script>
@@ -504,7 +611,7 @@ function showState(s){if(s.model!==undefined)$('model').textContent=s.model+(s.p
  if(s.context&&s.context.window){$('ctx').textContent=Math.round(s.context.percent||0)+'% of context'}if(s.busy!==undefined)setBusy(s.busy);if(s.name)document.title=s.name+' · Omni'}
 function argLine(a){try{const s=JSON.stringify(a);return s.length>140?s.slice(0,140)+'…':s}catch(e){return ''}}
 function handle(ev){
- if(ev.type==='user'){cur=null;think=null;add(el('div','msg user',ev.text));setBusy(true)}
+ if(ev.type==='user'){cur=null;think=null;add(el('div','msg user',ev.text+(ev.images?'  ['+ev.images+' image'+(ev.images>1?'s':'')+']':'')));if(!ev.history)setBusy(true)}
  else if(ev.type==='assistant'){add(el('div','msg assistant',ev.text))}
  else if(ev.type==='delta'){if(!cur){cur=add(el('div','msg assistant',''));think=null}cur.textContent+=ev.text;stick()}
  else if(ev.type==='thinking'){if(!think){think=add(el('div','thinking',''));cur=null}think.textContent+=ev.text;stick()}
@@ -537,8 +644,30 @@ function hints(){const h=$('hints'),v=box.value;if(!v.startsWith('/')||v.include
  const q=v.slice(1).toLowerCase(),m=commands.filter(c=>c.name.toLowerCase().startsWith(q)).slice(0,40);h.textContent='';if(!m.length){h.style.display='none';return[]}
  hintIndex=Math.min(hintIndex,m.length-1);m.forEach((c,i)=>{const r=el('div',i===hintIndex?'on':'');r.setAttribute('role','option');r.appendChild(el('span','','/'+c.name));r.appendChild(el('small','',c.description));
   r.onmousedown=e=>{e.preventDefault();box.value='/'+c.name+' ';h.style.display='none';box.focus()};h.appendChild(r)});h.style.display='block';return m}
-function send(){const t=box.value.trim();if(!t)return;box.value='';box.style.height='auto';$('hints').style.display='none';
- api('/api/prompt',{text:t}).then(r=>{if(!r.ok)handle({type:'notice',level:'error',message:r.error||'could not send'})})}
+let pics=[];
+function showPics(){const p=$('pics');p.textContent='';pics.forEach((x,i)=>{const im=el('img');im.src='data:'+x.mimeType+';base64,'+x.data;
+ im.alt='attached image '+(i+1)+' (click to remove)';im.title='Click to remove';im.onclick=()=>{pics.splice(i,1);showPics()};p.appendChild(im)});p.classList.toggle('on',pics.length>0)}
+function addFiles(files){[...files].filter(f=>/^image\/(png|jpeg|gif|webp)$/.test(f.type)).slice(0,6-pics.length).forEach(f=>{
+ if(f.size>8e6){handle({type:'notice',level:'error',message:f.name+' is larger than 8 MB'});return}
+ const r=new FileReader();r.onload=()=>{pics.push({mimeType:f.type,data:String(r.result).split(',')[1]});showPics()};r.readAsDataURL(f)})}
+box.addEventListener('paste',e=>{const f=e.clipboardData&&e.clipboardData.files;if(f&&f.length){e.preventDefault();addFiles(f)}});
+main.addEventListener('dragover',e=>{e.preventDefault();main.classList.add('drop')});main.addEventListener('dragleave',()=>main.classList.remove('drop'));
+main.addEventListener('drop',e=>{e.preventDefault();main.classList.remove('drop');addFiles(e.dataTransfer.files)});
+function send(){const t=box.value.trim();if(!t&&!pics.length)return;const body={text:t};if(pics.length)body.images=pics;
+ api('/api/prompt',body).then(r=>{if(!r.ok){handle({type:'notice',level:'error',message:r.error||'could not send'});return}
+  box.value='';box.style.height='auto';pics=[];showPics()});$('hints').style.display='none'}
+function chooser(title,rows,pick,filterText){const d=$('dlg');d.textContent='';d.appendChild(el('h3','',title));
+ const f=el('input','filter');f.placeholder=filterText;f.setAttribute('aria-label',filterText);const l=el('div','list');
+ const draw=()=>{l.textContent='';const q=f.value.toLowerCase();rows.filter(r=>(r.label+' '+r.sub).toLowerCase().includes(q)).slice(0,200).forEach(r=>{
+  const b=el('button',r.cur?'cur':'');b.type='button';b.appendChild(el('span','',r.label));if(r.sub)b.appendChild(el('small','',r.sub));
+  b.onclick=()=>{d.close();pick(r)};l.appendChild(b)})};f.oninput=draw;d.appendChild(f);d.appendChild(l);
+ const row=el('div','row'),c=el('button','','Close');c.type='button';c.onclick=()=>d.close();row.appendChild(c);d.appendChild(row);
+ d.oncancel=null;draw();d.showModal();f.focus()}
+$('pickModel').onclick=()=>api('/api/models').then(r=>chooser('Model',r.models.map(m=>({key:m.key,label:m.name,cur:m.key===r.current,
+ sub:m.key+(m.images?' · images':'')+(m.reasoning?' · reasoning':'')})),m=>api('/api/model',{key:m.key}).then(x=>{if(!x.ok)handle({type:'notice',level:'error',message:x.error})}),'Filter models'));
+$('pickSession').onclick=()=>api('/api/sessions').then(r=>chooser('Sessions',[{new:1,label:'+ New session',sub:''}].concat(r.sessions.map(x=>({path:x.path,cur:x.current,
+ label:x.name||x.first||'(empty)',sub:new Date(x.mtime*1000).toLocaleString()+' · '+x.messages+' messages'}))),
+ x=>api('/api/session',x.new?{action:'new'}:{action:'resume',path:x.path}).then(y=>{if(!y.ok)handle({type:'notice',level:'error',message:y.error||'could not switch'})}),'Filter sessions'));
 $('form').onsubmit=e=>{e.preventDefault();send()};$('stop').onclick=()=>api('/api/abort',{});
 box.oninput=()=>{box.style.height='auto';box.style.height=Math.min(box.scrollHeight,220)+'px';hintIndex=0;hints()};
 box.onkeydown=e=>{const m=$('hints').style.display==='block'?hints():[];
@@ -546,7 +675,7 @@ box.onkeydown=e=>{const m=$('hints').style.display==='block'?hints():[];
  if(m.length&&e.key==='Tab'){e.preventDefault();box.value='/'+m[hintIndex].name+' ';$('hints').style.display='none';return}
  if(e.key==='Escape'){if(m.length)$('hints').style.display='none';else if(busy)api('/api/abort',{});return}
  if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();send()}};
-function load(){return api('/api/state').then(s=>{commands=s.commands||[];showState(s);(s.history||[]).forEach(handle);setBusy(!!s.busy);main.scrollTop=main.scrollHeight})}
+function load(){return api('/api/state').then(s=>{commands=s.commands||[];showState(s);(s.history||[]).forEach(h=>handle(Object.assign({history:1},h)));setBusy(!!s.busy);main.scrollTop=main.scrollHeight})}
 function listen(){const es=new EventSource('/api/events?k='+encodeURIComponent(key));es.onmessage=m=>{try{handle(JSON.parse(m.data))}catch(e){}};
  es.onerror=()=>{es.close();setTimeout(listen,1500)}}
 load().then(listen);box.focus();
